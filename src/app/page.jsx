@@ -47,7 +47,7 @@ export default function Home() {
   }
 
   const redirectToWorkerDashboard = () => {
-    router.push('/WorkerDashboard')
+    router.push('/worker')
   }
 
   const redirectToAdminDashboard = () => {
