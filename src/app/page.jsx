@@ -3,11 +3,59 @@
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import React, { useContext, useEffect, useState } from 'react'
+import { AuthContext } from '../../Provider/AuthProvider'
+import LoadingAnimation from '../../components/LoadingAnimation'
 
 export default function Home() {
+  const { user, logOut } = useContext(AuthContext)
   const router = useRouter()
-  const handleSignIn = () => {
+  const [dbUser, setDbUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  // Fetch user role from DB if logged in
+  useEffect(() => {
+    if (!user) {
+      setDbUser(null)
+      setLoading(false)
+      return
+    }
+
+    const fetchUserData = async () => {
+      try {
+        const res = await fetch(`/api/user?email=${user.email}`)
+        const data = await res.json()
+        if (data.exists) setDbUser(data.user)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchUserData()
+  }, [user])
+
+  // SignOut
+  const handleSignOut = () => {
+    logOut().then().catch()
+  }
+
+  // Redirect functions
+  const redirectToLoginSignup = () => {
     router.push('/RegistrationPage')
+  }
+
+  const redirectToWorkerDashboard = () => {
+    router.push('/WorkerDashboard')
+  }
+
+  const redirectToAdminDashboard = () => {
+    router.push('/admin')
+  }
+
+  if (loading) {
+    return <LoadingAnimation />
   }
   return (
     <div className="min-h-screen bg-[#fdfcf9] text-gray-900">
@@ -28,12 +76,35 @@ export default function Home() {
             to bags, every piece tells a story.
           </p>
 
-          <button
-            onClick={handleSignIn}
-            className="px-6 py-3 bg-amber-800 text-white rounded-2xl shadow-md hover:bg-amber-700 transition"
-          >
-            LOGIN / SIGNUP
-          </button>
+          {/* LOGIN BUTTON */}
+
+          <div className="flex gap-8">
+            <button
+              className="px-6 py-3 bg-amber-800 text-white rounded-2xl shadow-md hover:bg-amber-700 transition"
+              onClick={() => {
+                if (!user) redirectToLoginSignup()
+                else if (dbUser?.role === 'worker') redirectToWorkerDashboard()
+                else if (dbUser?.role === 'admin') redirectToAdminDashboard()
+              }}
+            >
+              {!user
+                ? 'LOGIN / SIGNUP'
+                : dbUser?.role === 'worker'
+                ? 'Worker Dashboard'
+                : dbUser?.role === 'admin'
+                ? 'Admin Dashboard'
+                : 'Dashboard'}
+            </button>
+
+            {user && (
+              <button
+                className="px-6 py-3 bg-amber-800 text-white rounded-2xl shadow-md hover:bg-amber-700 transition"
+                onClick={handleSignOut}
+              >
+                Sign Out
+              </button>
+            )}
+          </div>
         </motion.div>
 
         <motion.img
