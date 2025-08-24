@@ -1,0 +1,540 @@
+'use client'
+
+import { Controller, useForm } from 'react-hook-form'
+import { useContext, useEffect, useState } from 'react'
+import { HiEye, HiEyeOff } from 'react-icons/hi'
+import Image from 'next/image'
+import { AuthContext } from '../../../Provider/AuthProvider'
+import { useRouter } from 'next/navigation'
+
+import Swal from 'sweetalert2'
+import 'react-phone-input-2/lib/style.css'
+import PhoneInput from 'react-phone-input-2'
+
+export default function RegistrationPage() {
+  const {
+    handleGoogleSignIn,
+    user,
+    handleAppleSignIn,
+    createUser,
+    updateUser,
+    logOut,
+    signIn,
+    verifyEmail,
+    passwordReset,
+  } = useContext(AuthContext)
+  const router = useRouter()
+
+  //  Google login function
+  const handleGoogleLoginAndRedirect = async () => {
+    try {
+      await handleGoogleSignIn()
+      if (user) {
+        console.log('Google Sign-In User:', {
+          uid: user.uid,
+          displayName: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL,
+        })
+      }
+      router.push('/')
+    } catch (error) {
+      console.error('Google Sign-In Error:', error)
+      alert('Google Sign-In failed. Please try again.')
+    }
+  }
+
+  //  Apple login function
+  const handleAppleLoginAndRedirect = async () => {
+    try {
+      const result = await handleAppleSignIn()
+      const loggedInUser = result.user
+      console.log('Apple Sign-In User:', {
+        uid: loggedInUser.uid,
+        displayName: loggedInUser.displayName,
+        email: loggedInUser.email,
+        photoURL: loggedInUser.photoURL,
+      })
+      router.push('/')
+    } catch (error) {
+      console.error('Apple Sign-In Error:', error)
+      alert('Apple Sign-In failed. Please try again.')
+    }
+  }
+
+  const [accountType, setAccountType] = useState('Login')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [currentEmail, setCurrentEmail] = useState('')
+  // Hook Form
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    control,
+    formState: { errors, isValid },
+  } = useForm({ mode: 'onChange' })
+  const watchedEmail = watch('email')
+
+  const isSignup = accountType === 'Signup'
+
+  useEffect(() => {
+    setCurrentEmail(watchedEmail)
+  }, [watchedEmail])
+
+  // Form Submit For Login/Signup
+
+  const onSubmit = async (data) => {
+    if (!isSignup) {
+      // LOGIN FLOW
+      try {
+        const result = await signIn(data.email, data.password)
+
+        if (!result.user.emailVerified) {
+          // User not verified
+          await Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'warning',
+            title: 'Please verify your email before logging in!',
+            showConfirmButton: true,
+          })
+          return
+        }
+
+        // Email verified, save to backend if not already saved
+        const userDetails = {
+          email: result.user.email,
+          name: result.user.displayName,
+          phone: phoneNumber,
+          role: 'client',
+        }
+
+        const res = await fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(userDetails),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Failed to save user')
+        }
+
+        // Successfully saved → navigate
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'success',
+          title: `Welcome back, ${userDetails.name}!`,
+          showConfirmButton: false,
+          timer: 2000,
+          timerProgressBar: true,
+        })
+
+        router.push('/') // redirect to home
+      } catch (error) {
+        console.error(error)
+
+        // Friendly message for wrong credentials
+        let message = 'Login failed'
+        if (
+          error.code === 'auth/invalid-credential' ||
+          error.code === 'auth/wrong-password' ||
+          error.code === 'auth/user-not-found'
+        ) {
+          message = 'Wrong email or password'
+        }
+
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'error',
+          title: message,
+          showConfirmButton: false,
+          timer: 2000,
+          timerProgressBar: true,
+        })
+      }
+
+      return
+    }
+
+    // SIGNUP FLOW
+    const userDetails = {
+      email: data.email,
+      name: data.fullName,
+      role: 'client',
+    }
+
+    try {
+      // Create auth user
+      const result = await createUser(userDetails.email, data.password)
+
+      // Update profile
+      await updateUser(result.user, userDetails.name)
+
+      // Send verification email
+      await verifyEmail()
+
+      // Inform user to check email
+      await Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'info',
+        title: 'Check your email to verify your account before logging in!',
+        showConfirmButton: true,
+      })
+
+      // Reset form
+      reset()
+
+      // Log out user after registration
+      await logOut()
+    } catch (error) {
+      console.error(error)
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'error',
+        title: error.message || 'Registration failed',
+        showConfirmButton: false,
+        timer: 2000,
+        timerProgressBar: true,
+      })
+    }
+  }
+
+  // Password Reset Section
+
+  const handlePasswordReset = () => {
+    if (!currentEmail) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Oops...',
+        text: 'Please enter your email address first.',
+      })
+      return
+    }
+
+    passwordReset(currentEmail)
+      .then(() => {
+        Swal.fire({
+          icon: 'success',
+          title: 'Success!',
+          text: 'Password reset email sent! Please check your email.',
+        })
+      })
+      .catch((error) => {
+        console.error(error)
+        Swal.fire({
+          icon: 'error',
+          title: 'Error!',
+          text: error.message || 'Something went wrong.',
+        })
+      })
+  }
+
+  const imagePath = isSignup
+    ? '/SignIn_SignUp_Logo/SignIn.jpg'
+    : '/SignIn_SignUp_Logo/SignUp.avif'
+
+  return (
+    <div className="min-h-screen flex items-center justify-between">
+      <div className="flex w-full h-screen lg:px-[30px] xl:px-[60px]">
+        {/* Left: Dynamic Image */}
+        <div className="xl:w-2/5 lg:p-6 xl:p-8 relative hidden lg:block">
+          <img
+            className="rounded-lg md:h-[80%] lg:h-[90%] xl:h-auto"
+            src={imagePath}
+            alt=""
+          />
+        </div>
+
+        {/* Right: Form */}
+        <div className="w-full md:w-3/5 p-8 flex items-center justify-center mx-auto">
+          <div className="w-full max-w-md h-[80%] space-y-6">
+            <h2 className="text-2xl font-semibold text-center mb-4">
+              {isSignup ? 'Create an account' : 'Welcome back'}
+            </h2>
+
+            {/* Tabs */}
+            <div className="flex mb-4 border-[1px] p-1 border-gray-300 rounded-full overflow-hidden">
+              {['Login', 'Signup'].map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setAccountType(type)}
+                  className={`w-1/2 py-2 text-sm font-medium transition rounded-2xl ${
+                    accountType === type
+                      ? 'bg-amber-800 text-white'
+                      : 'bg-white text-black hover:bg-gray-100'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+
+            {/* Signup Description */}
+            {isSignup && (
+              <p className="text-sm text-gray-700 mb-2">
+                Continue to register as a <strong>new user</strong> to start
+                your journey.
+              </p>
+            )}
+
+            {/* Form */}
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              {isSignup ? (
+                <>
+                  {/* Full Name */}
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    {...register('fullName', {
+                      required: 'Full Name is required',
+                    })}
+                    className="w-full border border-gray-300 rounded-md px-4 py-2"
+                  />
+
+                  {/* Email */}
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    {...register('email', { required: 'Email is required' })}
+                    className="w-full border border-gray-300 rounded-md px-4 py-2"
+                  />
+
+                  {/* Phone Number Field */}
+                  <Controller
+                    name="phone"
+                    control={control}
+                    rules={{ required: 'Phone number is required' }}
+                    render={({ field }) => (
+                      <PhoneInput
+                        {...field}
+                        country={'auto'}
+                        enableSearch={true}
+                        placeholder="Enter phone number"
+                        inputClass="!w-full !border !border-gray-300 !rounded-md !pl-12 !py-2 !bg-white"
+                        buttonClass="!border !border-gray-300 !rounded-l-md !bg-gray-100"
+                        dropdownClass="!bg-white !border !border-gray-300"
+                        onChange={(value) => {
+                          field.onChange(value)
+                          setPhoneNumber(value)
+                        }}
+                      />
+                    )}
+                  />
+                  {errors.phone && (
+                    <p className="text-red-500 text-sm mt-1">
+                      {errors.phone.message}
+                    </p>
+                  )}
+
+                  {/* Password Field */}
+                  <div className="relative mt-3">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Password"
+                      {...register('password', {
+                        required: 'Password is required',
+                        pattern: {
+                          value: /^(?=.*[a-z])(?=.*[A-Z]).{6,}$/,
+                          message:
+                            'Password must have an uppercase letter, a lowercase letter, and be at least 6 characters long',
+                        },
+                      })}
+                      className="w-full border border-gray-300 rounded-md px-4 py-2 pr-10"
+                    />
+                    <span
+                      className="absolute top-2.5 right-3 text-gray-500 cursor-pointer"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <HiEyeOff size={20} />
+                      ) : (
+                        <HiEye size={20} />
+                      )}
+                    </span>
+                  </div>
+                  {errors.password && (
+                    <p className="text-red-500 text-sm mt-1">
+                      {errors.password.message}
+                    </p>
+                  )}
+
+                  {/* Confirm Password Field */}
+                  <div className="relative mt-3">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="Confirm Password"
+                      {...register('confirmPassword', {
+                        required: 'Please confirm your password',
+                        validate: (value) =>
+                          value === watch('password') ||
+                          'Passwords do not match',
+                      })}
+                      className="w-full border border-gray-300 rounded-md px-4 py-2 pr-10"
+                    />
+                    <span
+                      className="absolute top-2.5 right-3 text-gray-500 cursor-pointer"
+                      onClick={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
+                    >
+                      {showConfirmPassword ? (
+                        <HiEyeOff size={20} />
+                      ) : (
+                        <HiEye size={20} />
+                      )}
+                    </span>
+                  </div>
+                  {errors.confirmPassword && (
+                    <p className="text-red-500 text-sm mt-1">
+                      {errors.confirmPassword.message}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    {...register('email', { required: 'Email is required' })}
+                    className="w-full border border-gray-300 rounded-md px-4 py-2"
+                  />
+
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Password"
+                      {...register('password', {
+                        required: 'Password is required',
+                      })}
+                      className="w-full border border-gray-300 rounded-md px-4 py-2 pr-10"
+                    />
+                    <span
+                      className="absolute top-2.5 right-3 text-gray-500 cursor-pointer"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <HiEyeOff size={20} />
+                      ) : (
+                        <HiEye size={20} />
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Forgot Password Area */}
+                  <div className="flex justify-end mt-2">
+                    <button
+                      type="button"
+                      onClick={handlePasswordReset}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Legal text */}
+              {isSignup && (
+                <p className="text-xs text-gray-600">
+                  By selecting <strong>Create account</strong>, you agree to our{' '}
+                  <a href="#" className="text-blue-600 underline">
+                    User Agreement
+                  </a>{' '}
+                  and acknowledge reading our{' '}
+                  <a href="#" className="text-blue-600 underline">
+                    User Privacy Notice
+                  </a>
+                  .
+                </p>
+              )}
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={!isValid}
+                className={`w-full py-2 rounded-full font-semibold transition ${
+                  isValid
+                    ? 'bg-black text-white hover:bg-gray-900'
+                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                {isSignup ? 'Create account' : 'Login'}
+              </button>
+            </form>
+
+            {/* Switch Links */}
+            <p className="text-center text-sm text-gray-600">
+              {isSignup ? (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setAccountType('Login')}
+                    className="text-blue-600 underline"
+                  >
+                    Login
+                  </button>
+                </>
+              ) : (
+                <>
+                  Don't have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setAccountType('Signup')}
+                    className="text-blue-600 underline"
+                  >
+                    Signup
+                  </button>
+                </>
+              )}
+            </p>
+
+            {/* Social Login (only for Login tab) */}
+            {accountType === 'Login' && (
+              <>
+                <div className="text-center text-gray-500">
+                  or continue with
+                </div>
+                <div className="flex justify-center space-x-4">
+                  {/* Google */}
+                  <button
+                    onClick={handleGoogleLoginAndRedirect}
+                    className="w-12 h-12 bg-white border border-gray-300 rounded-full flex items-center justify-center hover:bg-gray-100"
+                  >
+                    <Image
+                      src="/SocialMediaLogo/Google.png"
+                      alt="Google"
+                      width={30}
+                      height={30}
+                    />
+                  </button>
+
+                  {/* Apple */}
+                  <button
+                    onClick={handleAppleLoginAndRedirect}
+                    className="w-12 h-12 bg-white border border-gray-300 rounded-full flex items-center justify-center hover:bg-gray-100"
+                  >
+                    <Image
+                      src="/SocialMediaLogo/Apple.png"
+                      alt="Apple"
+                      width={23}
+                      height={23}
+                    />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
