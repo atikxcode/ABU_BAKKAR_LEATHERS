@@ -25,7 +25,7 @@ export default function RootLayout({ children }) {
 
   return (
     <html lang="en">
-      <body className={`${josefinSans.variable} antialiased bg-purple-50`}>
+      <body className={`${josefinSans.variable} antialiased bg-amber-50`}>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

@@ -109,7 +109,7 @@ export default function RegistrationPage() {
           email: result.user.email,
           name: result.user.displayName,
           phone: phoneNumber,
-          role: 'client',
+          role: 'worker',
         }
 
         const res = await fetch('/api/user', {

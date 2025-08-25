@@ -3,60 +3,66 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   FaHome,
-  FaUser,
-  FaPlus,
-  FaPen,
-  FaServicestack,
-  FaCommentDots,
-  FaCog,
-  FaChartLine,
-  FaEnvelope,
-  FaFile,
-  FaCube,
-  FaChartPie,
-  FaNewspaper,
   FaUsers,
   FaCubes,
+  FaPlus,
+  FaPen,
+  FaCog,
+  FaChartLine,
 } from 'react-icons/fa'
 
 export default function AdminSidebar() {
   const pathname = usePathname()
 
   const sidebarOptions = [
-    { href: '/admin/statsManage', icon: FaChartLine },
-    { href: '/admin/userManage', icon: FaUsers },
-    { href: '/admin/option3', icon: FaCubes },
-    { href: '/admin/addProducts', icon: FaPlus },
-    { href: '/admin/option4', icon: FaPen },
-    { href: '/admin/option9', icon: FaCog },
-    { href: '/', icon: FaHome },
+    {
+      href: '/admin/LeatherStockAdmin',
+      icon: FaCubes,
+      label: 'Leather Stock',
+    },
+    {
+      href: '/admin/materialsStockManage',
+      icon: FaCubes,
+      label: 'Materials Stock',
+    },
+    {
+      href: '/admin/finishedProductManage',
+      icon: FaCubes,
+      label: 'Finished Products',
+    },
+    { href: '/admin/statsManage', icon: FaChartLine, label: 'Stats' },
+    { href: '/admin/userManage', icon: FaUsers, label: 'Users' },
+    { href: '/admin/addProducts', icon: FaPlus, label: 'Add Product' },
+    { href: '/admin/reports', icon: FaPen, label: 'Reports' },
+    { href: '/admin/settings', icon: FaCog, label: 'Settings' },
+    { href: '/', icon: FaHome, label: 'Home' },
   ]
 
   const isActive = (href) => pathname === href
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 w-24 h-screen overflow-y-auto  bg-white border-gray-700">
-      <div className="text-xl flex items-center gap-2 justify-center p-4 text-white font-bold">
+    <aside className="fixed inset-y-0 left-0 z-30 w-64 h-screen overflow-y-auto bg-amber-800 text-white shadow-lg">
+      <div className="flex items-center justify-center p-6">
         <img
-          className="w-[50px] h-[50px]"
+          className="w-14 h-14 rounded-full border-2 border-white"
           src="/Home_Category/company_logo.png"
-          alt=""
+          alt="Company Logo"
         />
       </div>
 
-      <nav className="flex flex-col mt-6  items-center ">
-        {sidebarOptions.map(({ href, icon: Icon }) => (
+      <nav className="mt-6 flex flex-col items-start">
+        {sidebarOptions.map(({ href, icon: Icon, label }) => (
           <Link
             key={href}
             href={href}
-            className={`flex items-center  px-4 py-4 rounded-[50%]  mt-2  transition-colors text-xl ${
+            className={`flex items-center gap-4 w-full px-6 py-3 text-lg font-medium rounded-r-lg transition-colors ${
               isActive(href)
-                ? 'bg-black text-white'
-                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                ? 'bg-amber-900'
+                : 'hover:bg-amber-700 hover:text-white'
             }`}
           >
             <Icon />
-            {/* <span className="ml-3">{label}</span> */}
+            <span>{label}</span>
           </Link>
         ))}
       </nav>
