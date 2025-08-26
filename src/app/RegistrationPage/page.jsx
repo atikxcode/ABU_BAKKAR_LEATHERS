@@ -24,44 +24,6 @@ export default function RegistrationPage() {
     passwordReset,
   } = useContext(AuthContext)
   const router = useRouter()
-
-  //  Google login function
-  const handleGoogleLoginAndRedirect = async () => {
-    try {
-      await handleGoogleSignIn()
-      if (user) {
-        console.log('Google Sign-In User:', {
-          uid: user.uid,
-          displayName: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL,
-        })
-      }
-      router.push('/')
-    } catch (error) {
-      console.error('Google Sign-In Error:', error)
-      alert('Google Sign-In failed. Please try again.')
-    }
-  }
-
-  //  Apple login function
-  const handleAppleLoginAndRedirect = async () => {
-    try {
-      const result = await handleAppleSignIn()
-      const loggedInUser = result.user
-      console.log('Apple Sign-In User:', {
-        uid: loggedInUser.uid,
-        displayName: loggedInUser.displayName,
-        email: loggedInUser.email,
-        photoURL: loggedInUser.photoURL,
-      })
-      router.push('/')
-    } catch (error) {
-      console.error('Apple Sign-In Error:', error)
-      alert('Apple Sign-In failed. Please try again.')
-    }
-  }
-
   const [accountType, setAccountType] = useState('Login')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -93,7 +55,6 @@ export default function RegistrationPage() {
         const result = await signIn(data.email, data.password)
 
         if (!result.user.emailVerified) {
-          // User not verified
           await Swal.fire({
             toast: true,
             position: 'top-end',
@@ -104,41 +65,37 @@ export default function RegistrationPage() {
           return
         }
 
-        // Email verified, save to backend if not already saved
-        const userDetails = {
-          email: result.user.email,
-          name: result.user.displayName,
-          phone: phoneNumber,
-          role: 'worker',
+        // Check user status in DB
+        const res = await fetch(`/api/user?email=${result.user.email}`)
+        const dbUser = await res.json()
+
+        if (!dbUser.user || dbUser.user.status !== 'approved') {
+          await Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'warning',
+            title:
+              'Your account is pending approval. Please wait for admin approval.',
+            showConfirmButton: true,
+          })
+          return
         }
 
-        const res = await fetch('/api/user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userDetails),
-        })
-
-        if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error || 'Failed to save user')
-        }
-
-        // Successfully saved → navigate
+        // Email verified + approved → success
         Swal.fire({
           toast: true,
           position: 'top-end',
           icon: 'success',
-          title: `Welcome back, ${userDetails.name}!`,
+          title: `Welcome back, ${dbUser.user.name}!`,
           showConfirmButton: false,
           timer: 2000,
           timerProgressBar: true,
         })
 
-        router.push('/') // redirect to home
+        router.push('/')
       } catch (error) {
         console.error(error)
 
-        // Friendly message for wrong credentials
         let message = 'Login failed'
         if (
           error.code === 'auth/invalid-credential' ||
@@ -166,32 +123,38 @@ export default function RegistrationPage() {
     const userDetails = {
       email: data.email,
       name: data.fullName,
-      role: 'client',
+      role: 'worker',
+      status: 'pending',
     }
 
     try {
-      // Create auth user
       const result = await createUser(userDetails.email, data.password)
-
-      // Update profile
       await updateUser(result.user, userDetails.name)
 
-      // Send verification email
+      // Save user immediately with status="pending"
+      const res = await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userDetails),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to save user')
+      }
+
       await verifyEmail()
 
-      // Inform user to check email
       await Swal.fire({
         toast: true,
         position: 'top-end',
         icon: 'info',
-        title: 'Check your email to verify your account before logging in!',
+        title:
+          'Check your email to verify your account. Admin approval is required before login.',
         showConfirmButton: true,
       })
 
-      // Reset form
       reset()
-
-      // Log out user after registration
       await logOut()
     } catch (error) {
       console.error(error)
@@ -496,42 +459,6 @@ export default function RegistrationPage() {
                 </>
               )}
             </p>
-
-            {/* Social Login (only for Login tab) */}
-            {accountType === 'Login' && (
-              <>
-                <div className="text-center text-gray-500">
-                  or continue with
-                </div>
-                <div className="flex justify-center space-x-4">
-                  {/* Google */}
-                  <button
-                    onClick={handleGoogleLoginAndRedirect}
-                    className="w-12 h-12 bg-white border border-gray-300 rounded-full flex items-center justify-center hover:bg-gray-100"
-                  >
-                    <Image
-                      src="/SocialMediaLogo/Google.png"
-                      alt="Google"
-                      width={30}
-                      height={30}
-                    />
-                  </button>
-
-                  {/* Apple */}
-                  <button
-                    onClick={handleAppleLoginAndRedirect}
-                    className="w-12 h-12 bg-white border border-gray-300 rounded-full flex items-center justify-center hover:bg-gray-100"
-                  >
-                    <Image
-                      src="/SocialMediaLogo/Apple.png"
-                      alt="Apple"
-                      width={23}
-                      height={23}
-                    />
-                  </button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>

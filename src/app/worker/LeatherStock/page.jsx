@@ -43,7 +43,7 @@ export default function LeatherStockPage() {
     try {
       const res = await fetch(`/api/user?email=${user.email}`)
       if (res.ok) {
-        const { user: userFromDB } = await res.json() // unwrap user
+        const { user: userFromDB } = await res.json()
         setCurrentUser(userFromDB)
       }
     } catch (err) {

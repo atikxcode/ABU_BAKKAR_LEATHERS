@@ -31,7 +31,7 @@ export default function AdminSidebar() {
       label: 'Finished Products',
     },
     { href: '/admin/statsManage', icon: FaChartLine, label: 'Stats' },
-    { href: '/admin/userManage', icon: FaUsers, label: 'Users' },
+    { href: '/admin/UserManage', icon: FaUsers, label: 'Users' },
     { href: '/admin/addProducts', icon: FaPlus, label: 'Add Product' },
     { href: '/admin/reports', icon: FaPen, label: 'Reports' },
     { href: '/admin/settings', icon: FaCog, label: 'Settings' },
