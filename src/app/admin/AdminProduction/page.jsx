@@ -39,8 +39,7 @@ export default function AdminProductionPage() {
       const reader = new FileReader()
       reader.readAsDataURL(file)
       reader.onload = () => {
-        // remove prefix like "data:image/png;base64,"
-        const base64 = reader.result.split(',')[1]
+        const base64 = reader.result.split(',')[1] // remove prefix
         resolve(base64)
       }
       reader.onerror = (error) => reject(error)
@@ -53,12 +52,8 @@ export default function AdminProductionPage() {
 
     try {
       let imageBase64 = null
+      if (imageFile) imageBase64 = await fileToBase64(imageFile)
 
-      if (imageFile) {
-        imageBase64 = await fileToBase64(imageFile)
-      }
-
-      // Send Base64 string to your backend
       await fetch('/api/stock/production', {
         method: 'POST',
         headers: {
@@ -69,7 +64,7 @@ export default function AdminProductionPage() {
           productName: formData.product,
           description: formData.description,
           quantity: formData.quantity,
-          image: imageBase64, // send Base64
+          image: imageBase64,
         }),
       })
 
@@ -80,6 +75,20 @@ export default function AdminProductionPage() {
       console.error(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // PATCH status update
+  const handleStatusChange = async (jobId, newStatus) => {
+    try {
+      await fetch(`/api/stock/production?id=${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', role: 'admin' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      fetchJobs()
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -169,7 +178,7 @@ export default function AdminProductionPage() {
             {job.image && (
               <img
                 src={job.image}
-                alt={job.product}
+                alt={job.productName}
                 className="w-full h-48 object-cover"
               />
             )}
@@ -182,20 +191,18 @@ export default function AdminProductionPage() {
                 <span className="font-semibold">Quantity Needed: </span>
                 {job.quantity}
               </p>
-              <p>
+              <div className="mb-2">
                 <span className="font-semibold">Status: </span>
-                <span
-                  className={`font-semibold ${
-                    job.status === 'approved'
-                      ? 'text-green-600'
-                      : job.status === 'rejected'
-                      ? 'text-red-600'
-                      : 'text-yellow-600'
-                  }`}
+                <select
+                  value={job.status}
+                  onChange={(e) => handleStatusChange(job._id, e.target.value)}
+                  className="border border-amber-300 rounded-lg px-2 py-1 focus:ring-2 focus:ring-amber-400"
                 >
-                  {job.status}
-                </span>
-              </p>
+                  <option value="pending">Pending</option>
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
             </div>
           </div>
         ))}

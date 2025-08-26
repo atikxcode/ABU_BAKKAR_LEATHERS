@@ -17,7 +17,7 @@ export default function WorkerSidebar() {
   const sidebarOptions = [
     { href: '/worker/LeatherStock', icon: FaCubes, label: 'Leather Stock' },
     { href: '/worker/MaterialStock', icon: FaCube, label: 'Materials' },
-    { href: '/worker/production', icon: FaBoxOpen, label: 'Productions' },
+    { href: '/worker/ProductionStock', icon: FaBoxOpen, label: 'Productions' },
     {
       href: '/worker/finished-goods',
       icon: FaBoxOpen,
