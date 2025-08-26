@@ -15,11 +15,14 @@ export default function WorkerSidebar() {
   const pathname = usePathname()
 
   const sidebarOptions = [
-    { href: '/worker/dashboard', icon: FaChartLine, label: 'Dashboard' },
-    { href: '/worker/LeatherStock', icon: FaCubes, label: 'Leather' },
-    { href: '/worker/materials-stock', icon: FaCube, label: 'Materials' },
-    { href: '/worker/production', icon: FaBoxOpen, label: 'Production' },
-    { href: '/worker/finished-goods', icon: FaBoxOpen, label: 'Finished' },
+    { href: '/worker/LeatherStock', icon: FaCubes, label: 'Leather Stock' },
+    { href: '/worker/MaterialStock', icon: FaCube, label: 'Materials' },
+    { href: '/worker/production', icon: FaBoxOpen, label: 'Productions' },
+    {
+      href: '/worker/finished-goods',
+      icon: FaBoxOpen,
+      label: 'Finished',
+    },
     { href: '/worker/reports', icon: FaClipboardList, label: 'Reports' },
     { href: '/worker/profile', icon: FaUser, label: 'Profile' },
     { href: '/', icon: FaHome, label: 'Home' },

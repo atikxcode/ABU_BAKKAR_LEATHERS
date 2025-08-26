@@ -21,7 +21,7 @@ export default function AdminSidebar() {
       label: 'Leather Stock',
     },
     {
-      href: '/admin/materialsStockManage',
+      href: '/admin/MaterialStockAdmin',
       icon: FaCubes,
       label: 'Materials Stock',
     },

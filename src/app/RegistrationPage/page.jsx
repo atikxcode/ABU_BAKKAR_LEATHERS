@@ -125,6 +125,7 @@ export default function RegistrationPage() {
       name: data.fullName,
       role: 'worker',
       status: 'pending',
+      phone: phoneNumber,
     }
 
     try {

@@ -1,11 +1,11 @@
-// app/api/<feature>/route.js
+// app/api/stock/materials/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// Helper function to check admin role (simple example, adapt as needed)
+// Helper function to check admin role
 const isAdmin = (req) => {
-  const role = req.headers.get('role') // assuming role sent in headers
+  const role = req.headers.get('role') // role sent in headers
   return role === 'admin'
 }
 
@@ -13,7 +13,7 @@ export async function GET(req) {
   try {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('materials') // replace with collection
+    const collection = db.collection('materials')
 
     const items = await collection.find().toArray()
     return NextResponse.json(items)
@@ -27,11 +27,16 @@ export async function POST(req) {
     const body = await req.json()
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('materials') // replace with collection
+    const collection = db.collection('materials')
+
+    // Ensure worker info is included
+    const { workerName, workerEmail, ...rest } = body
 
     const result = await collection.insertOne({
-      ...body,
-      date: new Date(),
+      ...rest,
+      workerName: workerName || 'Unknown',
+      workerEmail: workerEmail || 'unknown@example.com',
+      date: body.date ? new Date(body.date) : new Date(),
       status: body.status || 'pending',
     })
 
@@ -52,7 +57,7 @@ export async function PATCH(req) {
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('materials') // replace with collection
+    const collection = db.collection('materials')
 
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
@@ -78,7 +83,7 @@ export async function DELETE(req) {
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('materials') // replace with collection
+    const collection = db.collection('materials')
 
     const result = await collection.deleteOne({ _id: new ObjectId(id) })
     return NextResponse.json({ message: 'Deleted successfully', result })
