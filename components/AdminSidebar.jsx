@@ -26,6 +26,11 @@ export default function AdminSidebar() {
       label: 'Materials Stock',
     },
     {
+      href: '/admin/AdminProduction',
+      icon: FaCubes,
+      label: 'Production',
+    },
+    {
       href: '/admin/finishedProductManage',
       icon: FaCubes,
       label: 'Finished Products',
