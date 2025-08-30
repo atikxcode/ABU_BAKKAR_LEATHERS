@@ -18,6 +18,7 @@ export default function AdminProductionPage() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
   const [imageLoadErrors, setImageLoadErrors] = useState({})
+  const [deliveryInputs, setDeliveryInputs] = useState({}) // Track delivery quantity inputs
   const [formData, setFormData] = useState({
     product: '',
     description: '',
@@ -285,7 +286,7 @@ export default function AdminProductionPage() {
     }
   }
 
-  // Fetch applications for a specific job
+  // Enhanced function to view applications with delivery tracking
   const viewApplications = async (jobId, jobName) => {
     try {
       const res = await fetch(`/api/stock/production_apply?jobId=${jobId}`)
@@ -295,13 +296,20 @@ export default function AdminProductionPage() {
         setSelectedJobId(jobId)
         setSelectedJobName(jobName)
         setShowModal(true)
+
+        // Initialize delivery inputs
+        const inputs = {}
+        applications.forEach((app) => {
+          inputs[app._id] = app.deliveredQuantity || 0
+        })
+        setDeliveryInputs(inputs)
       }
     } catch (err) {
       console.error('Error fetching applications:', err)
     }
   }
 
-  // Update application status
+  // Enhanced function to update application status
   const updateApplicationStatus = async (applicationId, status) => {
     try {
       await fetch(`/api/stock/production_apply?id=${applicationId}`, {
@@ -312,13 +320,65 @@ export default function AdminProductionPage() {
         },
         body: JSON.stringify({ status }),
       })
-      // Refresh applications and jobs to update quantities
       viewApplications(selectedJobId, selectedJobName)
       fetchJobs()
       Swal.fire('Updated!', `Application ${status} successfully`, 'success')
     } catch (err) {
       console.error('Error updating application status:', err)
       Swal.fire('Error', 'Failed to update application status', 'error')
+    }
+  }
+
+  // Handle delivery quantity input change
+  const handleDeliveryInputChange = (applicationId, value) => {
+    setDeliveryInputs((prev) => ({
+      ...prev,
+      [applicationId]: Number(value) || 0,
+    }))
+  }
+
+  // Confirm delivery function
+  const confirmDelivery = async (application) => {
+    const deliveredQty = deliveryInputs[application._id] || 0
+
+    if (deliveredQty <= 0) {
+      Swal.fire('Warning', 'Please enter a valid delivered quantity', 'warning')
+      return
+    }
+
+    if (deliveredQty > application.quantity) {
+      Swal.fire(
+        'Warning',
+        'Delivered quantity cannot exceed approved quantity',
+        'warning'
+      )
+      return
+    }
+
+    try {
+      await fetch(`/api/stock/production_apply?id=${application._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          role: 'admin',
+        },
+        body: JSON.stringify({
+          deliveredQuantity: deliveredQty,
+          deliveredAt: new Date(),
+          deliveredBy: 'Admin',
+        }),
+      })
+
+      Swal.fire(
+        'Success!',
+        `Delivery of ${deliveredQty} pieces confirmed for ${application.workerName}`,
+        'success'
+      )
+      viewApplications(selectedJobId, selectedJobName)
+      fetchJobs()
+    } catch (err) {
+      console.error('Error confirming delivery:', err)
+      Swal.fire('Error', 'Failed to confirm delivery', 'error')
     }
   }
 
@@ -596,6 +656,290 @@ export default function AdminProductionPage() {
         })}
       </div>
 
+      {/* Enhanced Applications Modal with Delivery Tracking */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-amber-100 p-6 border-b border-amber-200">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-amber-900">
+                    Applications for: {selectedJobName}
+                  </h2>
+                  <p className="text-amber-700 mt-1">
+                    Total Applications: {selectedJobApplications.length}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="text-amber-900 hover:text-amber-700 text-3xl font-bold leading-none"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              {selectedJobApplications.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="text-gray-400 mb-4">
+                    <svg
+                      className="mx-auto h-16 w-16"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-gray-500 text-lg">
+                    No applications yet for this job
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {selectedJobApplications.map((application) => (
+                    <div
+                      key={application._id}
+                      className="bg-gray-50 border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+                    >
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Worker Info */}
+                        <div className="lg:col-span-2">
+                          <div className="flex items-start justify-between mb-3">
+                            <h3 className="text-xl font-semibold text-gray-900">
+                              {application.workerName}
+                            </h3>
+                            <span
+                              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                application.status === 'approved'
+                                  ? 'bg-green-100 text-green-800'
+                                  : application.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }`}
+                            >
+                              {application.status.charAt(0).toUpperCase() +
+                                application.status.slice(1)}
+                            </span>
+                          </div>
+
+                          <div className="space-y-2 text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium min-w-[100px]">
+                                Email:
+                              </span>
+                              <span>{application.workerEmail}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium min-w-[100px]">
+                                Phone:
+                              </span>
+                              <span>{application.workerPhone}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium min-w-[100px]">
+                                Approved:
+                              </span>
+                              <span className="font-semibold text-blue-600">
+                                {application.quantity} pieces
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium min-w-[100px]">
+                                Delivered:
+                              </span>
+                              <span
+                                className={`font-semibold ${
+                                  (application.deliveredQuantity || 0) > 0
+                                    ? 'text-green-600'
+                                    : 'text-gray-400'
+                                }`}
+                              >
+                                {application.deliveredQuantity || 0} pieces
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium min-w-[100px]">
+                                Remaining:
+                              </span>
+                              <span className="font-semibold text-orange-600">
+                                {application.quantity -
+                                  (application.deliveredQuantity || 0)}{' '}
+                                pieces
+                              </span>
+                            </div>
+                            {application.note && (
+                              <div className="flex items-start gap-2">
+                                <span className="font-medium min-w-[100px]">
+                                  Notes:
+                                </span>
+                                <span className="text-gray-700">
+                                  {application.note}
+                                </span>
+                              </div>
+                            )}
+                            {application.deliveredAt && (
+                              <div className="flex items-center gap-2 text-sm text-gray-500">
+                                <span className="font-medium">
+                                  Last Delivery:
+                                </span>
+                                <span>
+                                  {new Date(
+                                    application.deliveredAt
+                                  ).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons and Delivery Controls */}
+                        <div className="flex flex-col justify-center space-y-3">
+                          {application.status === 'pending' && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  updateApplicationStatus(
+                                    application._id,
+                                    'approved'
+                                  )
+                                }
+                                className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition font-medium text-sm"
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={() =>
+                                  updateApplicationStatus(
+                                    application._id,
+                                    'rejected'
+                                  )
+                                }
+                                className="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition font-medium text-sm"
+                              >
+                                ✗ Reject
+                              </button>
+                            </>
+                          )}
+
+                          {application.status === 'approved' && (
+                            <>
+                              {/* Delivery Quantity Input */}
+                              <div className="bg-blue-50 p-3 rounded-lg">
+                                <label className="block text-xs font-medium text-blue-900 mb-1">
+                                  Set Delivered Quantity:
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={application.quantity}
+                                  value={deliveryInputs[application._id] || 0}
+                                  onChange={(e) =>
+                                    handleDeliveryInputChange(
+                                      application._id,
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full border border-blue-300 px-2 py-1 rounded text-sm"
+                                  placeholder="Enter delivered amount"
+                                />
+                                <button
+                                  onClick={() => confirmDelivery(application)}
+                                  className="w-full mt-2 bg-blue-600 text-white py-1.5 px-3 rounded hover:bg-blue-700 transition font-medium text-sm"
+                                >
+                                  Confirm Delivery
+                                </button>
+                              </div>
+
+                              <button
+                                onClick={() =>
+                                  updateApplicationStatus(
+                                    application._id,
+                                    'pending'
+                                  )
+                                }
+                                className="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition font-medium text-sm"
+                              >
+                                ↺ Reset to Pending
+                              </button>
+                            </>
+                          )}
+
+                          {application.status === 'rejected' && (
+                            <button
+                              onClick={() =>
+                                updateApplicationStatus(
+                                  application._id,
+                                  'pending'
+                                )
+                              }
+                              className="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition font-medium text-sm"
+                            >
+                              ↺ Reset to Pending
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Enhanced Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  <span className="font-medium">Summary:</span>
+                  {selectedJobApplications.length > 0 && (
+                    <>
+                      <span className="ml-2">
+                        Pending:{' '}
+                        {
+                          selectedJobApplications.filter(
+                            (app) => app.status === 'pending'
+                          ).length
+                        }
+                      </span>
+                      <span className="ml-4">
+                        Approved:{' '}
+                        {
+                          selectedJobApplications.filter(
+                            (app) => app.status === 'approved'
+                          ).length
+                        }
+                      </span>
+                      <span className="ml-4">
+                        Total Delivered:{' '}
+                        {selectedJobApplications.reduce(
+                          (sum, app) => sum + (app.deliveredQuantity || 0),
+                          0
+                        )}{' '}
+                        pieces
+                      </span>
+                    </>
+                  )}
+                </div>
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-6 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Job Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -723,231 +1067,6 @@ export default function AdminProductionPage() {
                   className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition disabled:opacity-50"
                 >
                   {deleteLoading ? 'Deleting...' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Applications Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[85vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-amber-100 p-6 border-b border-amber-200">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-2xl font-bold text-amber-900">
-                    Applications for: {selectedJobName}
-                  </h2>
-                  <p className="text-amber-700 mt-1">
-                    Total Applications: {selectedJobApplications.length}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="text-amber-900 hover:text-amber-700 text-3xl font-bold leading-none"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 overflow-y-auto max-h-[65vh]">
-              {selectedJobApplications.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="text-gray-400 mb-4">
-                    <svg
-                      className="mx-auto h-16 w-16"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <p className="text-gray-500 text-lg">
-                    No applications yet for this job
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {selectedJobApplications.map((application) => (
-                    <div
-                      key={application._id}
-                      className="bg-gray-50 border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
-                    >
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Worker Info */}
-                        <div className="lg:col-span-2">
-                          <div className="flex items-start justify-between mb-3">
-                            <h3 className="text-xl font-semibold text-gray-900">
-                              {application.workerName}
-                            </h3>
-                            <span
-                              className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                application.status === 'approved'
-                                  ? 'bg-green-100 text-green-800'
-                                  : application.status === 'rejected'
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}
-                            >
-                              {application.status.charAt(0).toUpperCase() +
-                                application.status.slice(1)}
-                            </span>
-                          </div>
-
-                          <div className="space-y-2 text-gray-600">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium min-w-[80px]">
-                                Email:
-                              </span>
-                              <span>{application.workerEmail}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium min-w-[80px]">
-                                Phone:
-                              </span>
-                              <span>{application.workerPhone}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium min-w-[80px]">
-                                Quantity:
-                              </span>
-                              <span className="font-semibold text-blue-600">
-                                {application.quantity} pieces
-                              </span>
-                            </div>
-                            {application.note && (
-                              <div className="flex items-start gap-2">
-                                <span className="font-medium min-w-[80px]">
-                                  Notes:
-                                </span>
-                                <span className="text-gray-700">
-                                  {application.note}
-                                </span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2 text-sm text-gray-500 mt-3">
-                              <span className="font-medium">Applied:</span>
-                              <span>
-                                {new Date(
-                                  application.appliedAt
-                                ).toLocaleDateString('en-US', {
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-col justify-center space-y-3">
-                          {application.status === 'pending' && (
-                            <>
-                              <button
-                                onClick={() =>
-                                  updateApplicationStatus(
-                                    application._id,
-                                    'approved'
-                                  )
-                                }
-                                className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition font-medium"
-                              >
-                                ✓ Approve
-                              </button>
-                              <button
-                                onClick={() =>
-                                  updateApplicationStatus(
-                                    application._id,
-                                    'rejected'
-                                  )
-                                }
-                                className="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition font-medium"
-                              >
-                                ✗ Reject
-                              </button>
-                            </>
-                          )}
-                          {application.status === 'approved' && (
-                            <button
-                              onClick={() =>
-                                updateApplicationStatus(
-                                  application._id,
-                                  'pending'
-                                )
-                              }
-                              className="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition font-medium"
-                            >
-                              ↺ Reset to Pending
-                            </button>
-                          )}
-                          {application.status === 'rejected' && (
-                            <button
-                              onClick={() =>
-                                updateApplicationStatus(
-                                  application._id,
-                                  'pending'
-                                )
-                              }
-                              className="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition font-medium"
-                            >
-                              ↺ Reset to Pending
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
-              <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-600">
-                  <span className="font-medium">Summary:</span>
-                  {selectedJobApplications.length > 0 && (
-                    <>
-                      <span className="ml-2">
-                        Pending:{' '}
-                        {
-                          selectedJobApplications.filter(
-                            (app) => app.status === 'pending'
-                          ).length
-                        }
-                      </span>
-                      <span className="ml-4">
-                        Approved:{' '}
-                        {
-                          selectedJobApplications.filter(
-                            (app) => app.status === 'approved'
-                          ).length
-                        }
-                      </span>
-                      <span className="ml-4">
-                        Rejected:{' '}
-                        {
-                          selectedJobApplications.filter(
-                            (app) => app.status === 'rejected'
-                          ).length
-                        }
-                      </span>
-                    </>
-                  )}
-                </div>
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="px-6 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition"
-                >
-                  Close
                 </button>
               </div>
             </div>

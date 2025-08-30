@@ -31,7 +31,7 @@ export default function AdminSidebar() {
       label: 'Production',
     },
     {
-      href: '/admin/finishedProductManage',
+      href: '/admin/AdminFinishedProduct',
       icon: FaCubes,
       label: 'Finished Products',
     },

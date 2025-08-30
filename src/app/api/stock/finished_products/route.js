@@ -11,11 +11,86 @@ const isAdmin = (req) => {
 
 export async function GET(req) {
   try {
+    const { searchParams } = new URL(req.url)
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const workerEmail = searchParams.get('workerEmail')
+    const isWorkerRequest = searchParams.get('workerOnly') === 'true'
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('finished_products')
+    const finishedCollection = db.collection('finished_products')
+    const applicationsCollection = db.collection('production_apply')
 
-    const items = await collection.find().sort({ finishedAt: -1 }).toArray()
+    // Build query
+    let query = {}
+
+    // Date range filter
+    if (startDate && endDate) {
+      query.finishedAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate + 'T23:59:59.999Z'),
+      }
+    }
+
+    let items
+    if (isWorkerRequest && workerEmail) {
+      // Get worker's approved applications first
+      const workerApplications = await applicationsCollection
+        .find({
+          workerEmail: workerEmail,
+          status: 'approved',
+        })
+        .toArray()
+
+      const jobIds = workerApplications.map((app) => app.jobId)
+
+      if (jobIds.length > 0) {
+        query.productionJobId = { $in: jobIds }
+        items = await finishedCollection
+          .find(query)
+          .sort({ finishedAt: -1 })
+          .toArray()
+
+        // Enrich with worker's contribution data
+        items = items.map((item) => {
+          const workerApp = workerApplications.find(
+            (app) => app.jobId === item.productionJobId
+          )
+          return {
+            ...item,
+            workerContribution: workerApp ? workerApp.quantity : 0,
+            workerNotes: workerApp ? workerApp.note : '',
+          }
+        })
+      } else {
+        items = []
+      }
+    } else {
+      // Admin request - get all finished products
+      items = await finishedCollection
+        .find(query)
+        .sort({ finishedAt: -1 })
+        .toArray()
+
+      // Enrich with worker contribution data for admin view
+      for (let item of items) {
+        const applications = await applicationsCollection
+          .find({
+            jobId: item.productionJobId,
+            status: 'approved',
+          })
+          .toArray()
+
+        item.workerContributions = applications.map((app) => ({
+          workerName: app.workerName,
+          workerEmail: app.workerEmail,
+          quantity: app.quantity,
+          note: app.note,
+        }))
+      }
+    }
+
     return NextResponse.json(items)
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -78,37 +153,6 @@ export async function POST(req) {
     )
 
     return NextResponse.json(result, { status: 201 })
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
-
-export async function PATCH(req) {
-  try {
-    if (!isAdmin(req)) {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
-
-    const { searchParams } = new URL(req.url)
-    const id = searchParams.get('id')
-    const body = await req.json()
-
-    if (!id)
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 })
-
-    const client = await clientPromise
-    const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('finished_products')
-
-    const result = await collection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { ...body, updatedAt: new Date() } }
-    )
-
-    return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

@@ -19,7 +19,7 @@ export default function WorkerSidebar() {
     { href: '/worker/MaterialStock', icon: FaCube, label: 'Materials' },
     { href: '/worker/ProductionStock', icon: FaBoxOpen, label: 'Productions' },
     {
-      href: '/worker/finished-goods',
+      href: '/worker/WorkerFinishedProduct',
       icon: FaBoxOpen,
       label: 'Finished',
     },

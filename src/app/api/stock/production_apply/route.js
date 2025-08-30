@@ -3,27 +3,27 @@ import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// ----------------- Helpers -----------------
 const isAdmin = (req) => req.headers.get('role') === 'admin'
 const isWorker = (req) => req.headers.get('role') === 'worker'
 
-// Helper function to update production job remaining quantity
-const updateJobRemainingQuantity = async (db, jobId) => {
+// Helper function to update production job quantities
+const updateJobQuantities = async (db, jobId) => {
   try {
     const applyCollection = db.collection('production_apply')
     const productionCollection = db.collection('production')
 
-    // Get all approved applications for this job
-    const approvedApps = await applyCollection
+    // Get all delivered applications for this job
+    const deliveredApps = await applyCollection
       .find({
         jobId: jobId,
         status: 'approved',
+        deliveredQuantity: { $exists: true, $gt: 0 },
       })
       .toArray()
 
-    // Calculate total approved quantity
-    const totalApprovedQuantity = approvedApps.reduce(
-      (sum, app) => sum + app.quantity,
+    // Calculate total delivered quantity
+    const totalDeliveredQuantity = deliveredApps.reduce(
+      (sum, app) => sum + (app.deliveredQuantity || 0),
       0
     )
 
@@ -35,37 +35,29 @@ const updateJobRemainingQuantity = async (db, jobId) => {
 
     const remainingQuantity = Math.max(
       0,
-      originalJob.quantity - totalApprovedQuantity
+      originalJob.quantity - totalDeliveredQuantity
     )
 
-    // Update the job with remaining quantity and fulfilled quantity
+    // Update the job with delivered quantities
     await productionCollection.updateOne(
       { _id: new ObjectId(jobId) },
       {
         $set: {
           remainingQuantity: remainingQuantity,
-          fulfilledQuantity: totalApprovedQuantity,
+          fulfilledQuantity: totalDeliveredQuantity,
           updatedAt: new Date(),
         },
       }
     )
 
-    // If remaining quantity is 0, automatically close the job
-    if (remainingQuantity === 0) {
-      await productionCollection.updateOne(
-        { _id: new ObjectId(jobId) },
-        { $set: { status: 'closed' } }
-      )
-    }
-
     return true
   } catch (error) {
-    console.error('Error updating job remaining quantity:', error)
+    console.error('Error updating job quantities:', error)
     return false
   }
 }
 
-// ----------------- GET -----------------
+// GET endpoint remains the same
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url)
@@ -101,7 +93,7 @@ export async function GET(req) {
   }
 }
 
-// ----------------- POST -----------------
+// POST endpoint remains the same
 export async function POST(req) {
   try {
     if (!isWorker(req)) {
@@ -119,27 +111,17 @@ export async function POST(req) {
     const body = await req.json()
     const { jobId, quantity, note } = body
 
-    if (!jobId || !quantity) {
-      return NextResponse.json(
-        { error: 'Job ID and quantity are required' },
-        { status: 400 }
-      )
-    }
-
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-
     const usersCol = db.collection('user')
     const jobsCol = db.collection('production')
     const applyCol = db.collection('production_apply')
 
-    // Fetch worker from users collection
     const worker = await usersCol.findOne({ email })
     if (!worker) {
       return NextResponse.json({ error: 'Worker not found' }, { status: 404 })
     }
 
-    // Fetch the job
     const job = await jobsCol.findOne({ _id: new ObjectId(jobId) })
     if (!job)
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
@@ -149,19 +131,17 @@ export async function POST(req) {
         { status: 400 }
       )
 
-    // Check against remaining quantity if it exists, otherwise use original quantity
     const availableQuantity =
       job.remainingQuantity !== undefined ? job.remainingQuantity : job.quantity
-
-    if (Number(quantity) > availableQuantity)
+    if (Number(quantity) > availableQuantity) {
       return NextResponse.json(
         {
           error: `Cannot apply for more than ${availableQuantity} (remaining quantity)`,
         },
         { status: 400 }
       )
+    }
 
-    // Check if worker already applied
     const existing = await applyCol.findOne({
       jobId,
       workerId: worker._id.toString(),
@@ -172,7 +152,6 @@ export async function POST(req) {
         { status: 400 }
       )
 
-    // Insert application
     const result = await applyCol.insertOne({
       jobId,
       workerId: worker._id.toString(),
@@ -181,6 +160,9 @@ export async function POST(req) {
       note: note || '',
       status: 'pending',
       appliedAt: new Date(),
+      deliveredQuantity: 0, // Initialize delivered quantity
+      deliveredAt: null,
+      deliveredBy: null,
     })
 
     return NextResponse.json(result, { status: 201 })
@@ -189,7 +171,7 @@ export async function POST(req) {
   }
 }
 
-// ----------------- PATCH -----------------
+// Enhanced PATCH endpoint to handle delivery confirmations
 export async function PATCH(req) {
   try {
     if (!isAdmin(req))
@@ -209,7 +191,7 @@ export async function PATCH(req) {
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production_apply')
 
-    // Get the current application to check for status change
+    // Get the current application
     const currentApp = await collection.findOne({ _id: new ObjectId(id) })
     if (!currentApp) {
       return NextResponse.json(
@@ -218,15 +200,34 @@ export async function PATCH(req) {
       )
     }
 
+    // Handle delivery confirmation
+    if (body.deliveredQuantity !== undefined) {
+      body.deliveredAt = new Date()
+      body.deliveredBy = 'Admin'
+
+      // Validate delivered quantity doesn't exceed approved quantity
+      if (body.deliveredQuantity > currentApp.quantity) {
+        return NextResponse.json(
+          {
+            error: 'Delivered quantity cannot exceed approved quantity',
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // Update the application
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
       { $set: { ...body, updatedAt: new Date() } }
     )
 
-    // If status is being changed, update the job's remaining quantity
-    if (body.status && body.status !== currentApp.status) {
-      await updateJobRemainingQuantity(db, currentApp.jobId)
+    // Update job quantities if delivery was confirmed or status changed
+    if (
+      body.deliveredQuantity !== undefined ||
+      (body.status && body.status !== currentApp.status)
+    ) {
+      await updateJobQuantities(db, currentApp.jobId)
     }
 
     return NextResponse.json(result)
@@ -235,7 +236,7 @@ export async function PATCH(req) {
   }
 }
 
-// ----------------- DELETE -----------------
+// DELETE endpoint remains the same
 export async function DELETE(req) {
   try {
     if (!isAdmin(req))
@@ -253,14 +254,11 @@ export async function DELETE(req) {
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production_apply')
 
-    // Get the application before deleting to update job quantities
     const application = await collection.findOne({ _id: new ObjectId(id) })
-
     const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
-    // Update job remaining quantity after deletion
     if (application) {
-      await updateJobRemainingQuantity(db, application.jobId)
+      await updateJobQuantities(db, application.jobId)
     }
 
     return NextResponse.json({ message: 'Deleted successfully', result })
