@@ -1,4 +1,3 @@
-// app/api/stock/production_apply/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
@@ -12,22 +11,27 @@ const updateJobQuantities = async (db, jobId) => {
     const applyCollection = db.collection('production_apply')
     const productionCollection = db.collection('production')
 
-    // Get all delivered applications for this job
-    const deliveredApps = await applyCollection
-      .find({
-        jobId: jobId,
-        status: 'approved',
-        deliveredQuantity: { $exists: true, $gt: 0 },
-      })
-      .toArray()
+    // Use aggregation for better performance
+    const pipeline = [
+      {
+        $match: {
+          jobId: jobId,
+          status: 'approved',
+          deliveredQuantity: { $exists: true, $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: '$jobId',
+          totalDelivered: { $sum: '$deliveredQuantity' },
+        },
+      },
+    ]
 
-    // Calculate total delivered quantity
-    const totalDeliveredQuantity = deliveredApps.reduce(
-      (sum, app) => sum + (app.deliveredQuantity || 0),
-      0
-    )
+    const results = await applyCollection.aggregate(pipeline).toArray()
+    const totalDeliveredQuantity =
+      results.length > 0 ? results[0].totalDelivered : 0
 
-    // Get original job to calculate remaining quantity
     const originalJob = await productionCollection.findOne({
       _id: new ObjectId(jobId),
     })
@@ -38,7 +42,6 @@ const updateJobQuantities = async (db, jobId) => {
       originalJob.quantity - totalDeliveredQuantity
     )
 
-    // Update the job with delivered quantities
     await productionCollection.updateOne(
       { _id: new ObjectId(jobId) },
       {
@@ -57,7 +60,6 @@ const updateJobQuantities = async (db, jobId) => {
   }
 }
 
-// GET endpoint remains the same
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url)
@@ -73,7 +75,7 @@ export async function GET(req) {
 
     const applications = await applyCollection.find(query).toArray()
 
-    // Enrich applications with worker phone numbers
+    // Enrich applications with worker details
     const enrichedApplications = await Promise.all(
       applications.map(async (app) => {
         const worker = await usersCollection.findOne({
@@ -82,7 +84,7 @@ export async function GET(req) {
         return {
           ...app,
           workerPhone: worker?.phone || 'N/A',
-          workerEmail: worker?.email || 'N/A',
+          workerEmail: app.workerEmail || worker?.email || 'N/A', // Use stored email first
         }
       })
     )
@@ -93,7 +95,6 @@ export async function GET(req) {
   }
 }
 
-// POST endpoint remains the same
 export async function POST(req) {
   try {
     if (!isWorker(req)) {
@@ -152,15 +153,17 @@ export async function POST(req) {
         { status: 400 }
       )
 
+    // ✅ CRITICAL FIX: Store workerEmail explicitly
     const result = await applyCol.insertOne({
       jobId,
       workerId: worker._id.toString(),
       workerName: worker.name,
+      workerEmail: email, // ✅ This was missing!
       quantity: Number(quantity),
       note: note || '',
       status: 'pending',
       appliedAt: new Date(),
-      deliveredQuantity: 0, // Initialize delivered quantity
+      deliveredQuantity: 0,
       deliveredAt: null,
       deliveredBy: null,
     })
@@ -171,7 +174,6 @@ export async function POST(req) {
   }
 }
 
-// Enhanced PATCH endpoint to handle delivery confirmations
 export async function PATCH(req) {
   try {
     if (!isAdmin(req))
@@ -191,7 +193,6 @@ export async function PATCH(req) {
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production_apply')
 
-    // Get the current application
     const currentApp = await collection.findOne({ _id: new ObjectId(id) })
     if (!currentApp) {
       return NextResponse.json(
@@ -205,7 +206,6 @@ export async function PATCH(req) {
       body.deliveredAt = new Date()
       body.deliveredBy = 'Admin'
 
-      // Validate delivered quantity doesn't exceed approved quantity
       if (body.deliveredQuantity > currentApp.quantity) {
         return NextResponse.json(
           {
@@ -236,7 +236,6 @@ export async function PATCH(req) {
   }
 }
 
-// DELETE endpoint remains the same
 export async function DELETE(req) {
   try {
     if (!isAdmin(req))

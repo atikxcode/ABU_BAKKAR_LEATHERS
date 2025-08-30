@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useContext } from 'react'
 import { DateRangePicker } from 'react-date-range'
-import jsPDF from 'jspdf'
-import 'jspdf-autotable'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { format } from 'date-fns'
 import Swal from 'sweetalert2'
 import { AuthContext } from '../../../../Provider/AuthProvider'
@@ -27,8 +27,12 @@ export default function WorkerFinishedProductsPage() {
   ])
 
   const fetchFinishedProducts = async (customRange = null) => {
-    if (!userEmail) return
+    if (!userEmail) {
+      console.log('❌ No userEmail found:', userEmail)
+      return
+    }
 
+    console.log('🔍 Fetching finished products for user:', userEmail)
     setLoading(true)
     try {
       const range = customRange || dateRange[0]
@@ -39,15 +43,37 @@ export default function WorkerFinishedProductsPage() {
         workerOnly: 'true',
       })
 
+      console.log(
+        '📡 API Request URL:',
+        `/api/stock/finished_products?${params}`
+      )
+
       const res = await fetch(`/api/stock/finished_products?${params}`)
+      console.log('📡 Response status:', res.status)
+
       if (res.ok) {
         const data = await res.json()
+        console.log('✅ Raw API data:', data)
+        console.log('📊 Items count:', data.length)
+
+        // Log each item's details
+        data.forEach((item, index) => {
+          console.log(`📦 Item ${index + 1}:`, {
+            productName: item.productName,
+            workerContribution: item.workerContribution,
+            workerNotes: item.workerNotes,
+            finishedAt: item.finishedAt,
+          })
+        })
+
         setFinishedProducts(data)
       } else {
+        const errorText = await res.text()
+        console.log('❌ API Error Response:', errorText)
         Swal.fire('Error', 'Failed to fetch finished products', 'error')
       }
     } catch (err) {
-      console.error(err)
+      console.error('💥 Network Error:', err)
       Swal.fire('Error', 'An error occurred', 'error')
     } finally {
       setLoading(false)
@@ -55,6 +81,8 @@ export default function WorkerFinishedProductsPage() {
   }
 
   useEffect(() => {
+    console.log('👤 Current user:', user)
+    console.log('📧 User email:', userEmail)
     if (userEmail) {
       fetchFinishedProducts()
     }
@@ -119,7 +147,8 @@ export default function WorkerFinishedProductsPage() {
       product.workerNotes || '-',
     ])
 
-    doc.autoTable({
+    // Fixed autoTable usage
+    autoTable(doc, {
       head: [
         [
           'Product Name',
@@ -134,7 +163,7 @@ export default function WorkerFinishedProductsPage() {
       styles: { fontSize: 9 },
       headStyles: { fillColor: [146, 64, 14] },
       columnStyles: {
-        4: { cellWidth: 40 }, // Notes column wider
+        4: { cellWidth: 40 },
       },
     })
 
@@ -279,6 +308,17 @@ export default function WorkerFinishedProductsPage() {
         My Finished Products
       </h1>
 
+      {/* Debug Panel */}
+      {/* <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm">
+        <p>
+          <strong>🔍 Debug Info:</strong>
+        </p>
+        <p>User Email: {userEmail || 'Not loaded'}</p>
+        <p>Products Found: {finishedProducts.length}</p>
+        <p>Filtered Products: {filteredProducts.length}</p>
+        <p>Loading: {loading ? 'Yes' : 'No'}</p>
+      </div> */}
+
       {/* Controls */}
       <div className="bg-white rounded-xl shadow-lg p-4 mb-6 border border-amber-200">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -419,13 +459,13 @@ export default function WorkerFinishedProductsPage() {
           {filteredProducts.map((product) => (
             <div
               key={product._id}
-              className="bg-white rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
+              className="bg-white w-96 rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
             >
               {product.image && (
                 <img
                   src={product.image}
                   alt={product.productName}
-                  className="w-full h-32 object-contain bg-gray-50"
+                  className="w-full h-64 object-cover bg-gray-50"
                 />
               )}
 
@@ -449,13 +489,13 @@ export default function WorkerFinishedProductsPage() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Pieces Produced:</span>
                       <span className="font-bold text-green-600">
-                        {product.workerContribution}
+                        {product.workerContribution || 0}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Project Total:</span>
                       <span className="font-semibold">
-                        {product.originalQuantity}
+                        {product.originalQuantity || 0}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -463,7 +503,7 @@ export default function WorkerFinishedProductsPage() {
                       <span className="font-semibold text-blue-600">
                         {product.originalQuantity > 0
                           ? Math.round(
-                              (product.workerContribution /
+                              ((product.workerContribution || 0) /
                                 product.originalQuantity) *
                                 100
                             )

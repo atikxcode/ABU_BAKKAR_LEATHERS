@@ -1,4 +1,3 @@
-// app/api/stock/finished_products/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
@@ -16,6 +15,13 @@ export async function GET(req) {
     const endDate = searchParams.get('endDate')
     const workerEmail = searchParams.get('workerEmail')
     const isWorkerRequest = searchParams.get('workerOnly') === 'true'
+
+    console.log('🔍 Finished products request:', {
+      startDate,
+      endDate,
+      workerEmail,
+      isWorkerRequest,
+    })
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
@@ -35,13 +41,18 @@ export async function GET(req) {
 
     let items
     if (isWorkerRequest && workerEmail) {
-      // Get worker's approved applications first
+      console.log('📋 Getting worker finished products for:', workerEmail)
+
+      // Get worker's approved applications with actual deliveries only
       const workerApplications = await applicationsCollection
         .find({
           workerEmail: workerEmail,
           status: 'approved',
+          deliveredQuantity: { $exists: true, $gt: 0 }, // Only applications with actual deliveries
         })
         .toArray()
+
+      console.log('📝 Worker applications found:', workerApplications.length)
 
       const jobIds = workerApplications.map((app) => app.jobId)
 
@@ -52,17 +63,21 @@ export async function GET(req) {
           .sort({ finishedAt: -1 })
           .toArray()
 
-        // Enrich with worker's contribution data
-        items = items.map((item) => {
-          const workerApp = workerApplications.find(
-            (app) => app.jobId === item.productionJobId
-          )
-          return {
-            ...item,
-            workerContribution: workerApp ? workerApp.quantity : 0,
-            workerNotes: workerApp ? workerApp.note : '',
-          }
-        })
+        // Enrich with worker's ACTUAL contribution data (deliveredQuantity)
+        items = items
+          .map((item) => {
+            const workerApp = workerApplications.find(
+              (app) => app.jobId === item.productionJobId
+            )
+            return {
+              ...item,
+              workerContribution: workerApp
+                ? workerApp.deliveredQuantity || 0
+                : 0, // Use deliveredQuantity
+              workerNotes: workerApp ? workerApp.note || '' : '',
+            }
+          })
+          .filter((item) => item.workerContribution > 0) // Only show items with actual contributions
       } else {
         items = []
       }
@@ -85,14 +100,17 @@ export async function GET(req) {
         item.workerContributions = applications.map((app) => ({
           workerName: app.workerName,
           workerEmail: app.workerEmail,
-          quantity: app.quantity,
+          quantity: app.quantity, // Approved quantity
+          deliveredQuantity: app.deliveredQuantity || 0, // Actual delivered quantity
           note: app.note,
         }))
       }
     }
 
+    console.log('✅ Returning finished products:', items.length)
     return NextResponse.json(items)
   } catch (err) {
+    console.error('❌ Error in finished products API:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
