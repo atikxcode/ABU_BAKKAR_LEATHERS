@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { DateRangePicker } from 'react-date-range'
 import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable' // Correct import
+import autoTable from 'jspdf-autotable'
 import { format } from 'date-fns'
 import Swal from 'sweetalert2'
 import 'react-date-range/dist/styles.css'
@@ -59,6 +59,67 @@ export default function AdminFinishedProductsPage() {
     setShowDatePicker(false)
   }
 
+  // Delete finished product function
+  const deleteFinishedProduct = async (product) => {
+    const result = await Swal.fire({
+      title: 'Delete Finished Product?',
+      html: `
+        <div class="text-left">
+          <p><strong>Product:</strong> ${product.productName}</p>
+          <p><strong>Finished Date:</strong> ${format(
+            new Date(product.finishedAt),
+            'MMM dd, yyyy'
+          )}</p>
+          <p><strong>Fulfilled Quantity:</strong> ${
+            product.fulfilledQuantity || 0
+          }</p>
+          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete this finished product record!</p>
+          <p class="text-sm text-gray-600 mt-2">Note: This will NOT affect the original production job.</p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Yes, Delete It!',
+      cancelButtonText: 'Cancel',
+    })
+
+    if (result.isConfirmed) {
+      try {
+        const response = await fetch(
+          `/api/stock/finished_products?id=${product._id}`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              role: 'admin',
+            },
+          }
+        )
+
+        if (response.ok) {
+          Swal.fire(
+            'Deleted!',
+            `"${product.productName}" has been deleted successfully.`,
+            'success'
+          )
+          fetchFinishedProducts() // Refresh the list
+        } else {
+          const error = await response.json()
+          Swal.fire(
+            'Error',
+            error.message || 'Failed to delete finished product',
+            'error'
+          )
+        }
+      } catch (err) {
+        console.error('Error deleting finished product:', err)
+        Swal.fire('Error', 'An error occurred while deleting', 'error')
+      }
+    }
+  }
+
   const downloadAllProductsReport = () => {
     const doc = new jsPDF()
 
@@ -97,7 +158,6 @@ export default function AdminFinishedProductsPage() {
       product.status || 'Completed',
     ])
 
-    // Correct usage: autoTable(doc, options)
     autoTable(doc, {
       head: [
         [
@@ -192,7 +252,9 @@ export default function AdminFinishedProductsPage() {
 
         product.workerContributions.forEach((contrib) => {
           doc.text(
-            `  • ${contrib.workerName}: ${contrib.quantity} pieces`,
+            `  • ${contrib.workerName}: ${
+              contrib.deliveredQuantity || contrib.quantity
+            } pieces`,
             25,
             yPosition
           )
@@ -367,7 +429,7 @@ export default function AdminFinishedProductsPage() {
           {filteredProducts.map((product) => (
             <div
               key={product._id}
-              className="bg-white w-96 rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
+              className="bg-white rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
             >
               {product.image && (
                 <img
@@ -378,9 +440,29 @@ export default function AdminFinishedProductsPage() {
               )}
 
               <div className="p-4">
-                <h3 className="font-bold text-amber-900 text-lg mb-2">
-                  {product.productName}
-                </h3>
+                {/* Header with Delete Button */}
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-bold text-amber-900 text-lg flex-1">
+                    {product.productName}
+                  </h3>
+                  <button
+                    onClick={() => deleteFinishedProduct(product)}
+                    className="text-red-600 hover:text-red-800 transition-colors p-1"
+                    title="Delete Finished Product"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </div>
 
                 {product.description && (
                   <p className="text-gray-600 text-sm mb-3 line-clamp-2">
@@ -422,7 +504,7 @@ export default function AdminFinishedProductsPage() {
                             <span className="font-medium">
                               {contrib.workerName}:
                             </span>{' '}
-                            {contrib.quantity} pcs
+                            {contrib.deliveredQuantity || contrib.quantity} pcs
                           </div>
                         ))}
                       </div>

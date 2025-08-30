@@ -5,19 +5,50 @@ import { ObjectId } from 'mongodb'
 
 // Helper function to check admin role
 const isAdmin = (req) => {
-  const role = req.headers.get('role') // role sent in headers
+  const role = req.headers.get('role')
   return role === 'admin'
 }
 
 export async function GET(req) {
   try {
+    const { searchParams } = new URL(req.url)
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const status = searchParams.get('status')
+    const type = searchParams.get('type')
+    const workerEmail = searchParams.get('workerEmail')
+
+    console.log('🔍 Leather stock request:', {
+      startDate,
+      endDate,
+      status,
+      type,
+      workerEmail,
+    })
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
-    const items = await collection.find().toArray()
+    // Build query filter
+    let query = {}
+
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate + 'T23:59:59.999Z'),
+      }
+    }
+
+    if (status && status !== 'all') query.status = status
+    if (type) query.type = new RegExp(type, 'i') // Case insensitive search
+    if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
+
+    const items = await collection.find(query).sort({ date: -1 }).toArray()
+    console.log('✅ Returning leather stock items:', items.length)
     return NextResponse.json(items)
   } catch (err) {
+    console.error('❌ GET leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -25,47 +56,134 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const body = await req.json()
+
+    // Enhanced input validation
+    if (
+      !body.type ||
+      typeof body.type !== 'string' ||
+      body.type.trim() === ''
+    ) {
+      return NextResponse.json(
+        { error: 'Leather type is required and must be a non-empty string' },
+        { status: 400 }
+      )
+    }
+
+    if (!body.quantity || isNaN(body.quantity) || Number(body.quantity) <= 0) {
+      return NextResponse.json(
+        { error: 'Quantity must be a positive number' },
+        { status: 400 }
+      )
+    }
+
+    if (
+      !body.unit ||
+      typeof body.unit !== 'string' ||
+      body.unit.trim() === ''
+    ) {
+      return NextResponse.json(
+        { error: 'Unit is required and must be a non-empty string' },
+        { status: 400 }
+      )
+    }
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
-    // Ensure worker info is included
     const { workerName, workerEmail, ...rest } = body
 
     const result = await collection.insertOne({
       ...rest,
+      type: body.type.trim(),
+      quantity: Number(body.quantity),
+      unit: body.unit.trim(),
       workerName: workerName || 'Unknown',
       workerEmail: workerEmail || 'unknown@example.com',
       date: new Date(),
       status: body.status || 'pending',
+      createdAt: new Date(),
     })
 
+    console.log('✅ Created leather stock entry:', result.insertedId)
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
+    console.error('❌ POST leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function PATCH(req) {
   try {
+    if (!isAdmin(req)) {
+      console.warn('⚠️ Unauthorized PATCH attempt on leather stock')
+      return NextResponse.json(
+        { error: 'Admin access required' },
+        { status: 403 }
+      )
+    }
+
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
     const body = await req.json()
 
-    if (!id)
+    if (!id) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 })
+    }
+
+    // Validate ObjectId format
+    if (!ObjectId.isValid(id)) {
+      return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
+    }
+
+    // Validate status if being updated
+    if (
+      body.status &&
+      !['pending', 'approved', 'rejected'].includes(body.status)
+    ) {
+      return NextResponse.json(
+        { error: 'Status must be pending, approved, or rejected' },
+        { status: 400 }
+      )
+    }
+
+    // Validate quantity if being updated
+    if (
+      body.quantity !== undefined &&
+      (isNaN(body.quantity) || Number(body.quantity) <= 0)
+    ) {
+      return NextResponse.json(
+        { error: 'Quantity must be a positive number' },
+        { status: 400 }
+      )
+    }
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
+    // Prepare update data
+    const updateData = { ...body, updatedAt: new Date() }
+    if (body.quantity !== undefined) {
+      updateData.quantity = Number(body.quantity)
+    }
+
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: body }
+      { $set: updateData }
     )
 
+    if (result.matchedCount === 0) {
+      return NextResponse.json(
+        { error: 'Stock entry not found' },
+        { status: 404 }
+      )
+    }
+
+    console.log('✅ Updated leather stock entry:', id)
     return NextResponse.json(result)
   } catch (err) {
+    console.error('❌ PATCH leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -73,21 +191,116 @@ export async function PATCH(req) {
 export async function DELETE(req) {
   try {
     if (!isAdmin(req)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      console.warn('⚠️ Unauthorized DELETE attempt on leather stock')
+      return NextResponse.json(
+        { error: 'Admin access required' },
+        { status: 403 }
+      )
     }
 
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
-    if (!id)
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 })
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const status = searchParams.get('status')
+    const type = searchParams.get('type')
+    const deleteType = searchParams.get('deleteType') // 'single' or 'bulk'
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
-    const result = await collection.deleteOne({ _id: new ObjectId(id) })
-    return NextResponse.json({ message: 'Deleted successfully', result })
+    // Single delete
+    if (deleteType === 'single' && id) {
+      if (!ObjectId.isValid(id)) {
+        return NextResponse.json(
+          { error: 'Invalid ID format' },
+          { status: 400 }
+        )
+      }
+
+      const result = await collection.deleteOne({ _id: new ObjectId(id) })
+
+      if (result.deletedCount === 0) {
+        console.log(`❌ DELETE failed: Stock entry ${id} not found`)
+        return NextResponse.json(
+          { error: 'Stock entry not found' },
+          { status: 404 }
+        )
+      }
+
+      console.log(`✅ Single stock entry ${id} deleted successfully`)
+      return NextResponse.json({
+        message: 'Stock entry deleted successfully',
+        deletedCount: result.deletedCount,
+      })
+    }
+
+    // Bulk delete by criteria
+    if (deleteType === 'bulk') {
+      let query = {}
+
+      // Build query for bulk delete
+      if (startDate && endDate) {
+        query.date = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate + 'T23:59:59.999Z'),
+        }
+      }
+
+      if (status && status !== 'all') query.status = status
+      if (type) query.type = new RegExp(type, 'i')
+
+      // Safety check - don't delete everything without criteria
+      if (Object.keys(query).length === 0) {
+        return NextResponse.json(
+          {
+            error: 'Bulk delete requires at least one filter criteria',
+          },
+          { status: 400 }
+        )
+      }
+
+      const result = await collection.deleteMany(query)
+
+      console.log(
+        `✅ Bulk delete completed: ${result.deletedCount} entries deleted`
+      )
+      return NextResponse.json({
+        message: `${result.deletedCount} stock entries deleted successfully`,
+        deletedCount: result.deletedCount,
+      })
+    }
+
+    // Legacy single delete (backwards compatibility)
+    if (id && !deleteType) {
+      if (!ObjectId.isValid(id)) {
+        return NextResponse.json(
+          { error: 'Invalid ID format' },
+          { status: 400 }
+        )
+      }
+
+      const result = await collection.deleteOne({ _id: new ObjectId(id) })
+
+      if (result.deletedCount === 0) {
+        return NextResponse.json(
+          { error: 'Stock entry not found' },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json({ message: 'Deleted successfully', result })
+    }
+
+    return NextResponse.json(
+      {
+        error: 'Invalid delete request. Specify deleteType as single or bulk',
+      },
+      { status: 400 }
+    )
   } catch (err) {
+    console.error('❌ DELETE leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
