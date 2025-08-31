@@ -138,7 +138,7 @@ export default function AdminLeatherStockPage() {
     }
   }
 
-  // Bulk delete by criteria
+  // Bulk delete functionality
   const showBulkDeleteModal = () => {
     setShowDeleteModal(true)
   }
@@ -218,7 +218,6 @@ export default function AdminLeatherStockPage() {
 
     if (result.isConfirmed) {
       try {
-        // Delete selected items one by one
         let deletedCount = 0
         for (const stockId of selectedItems) {
           const response = await fetch(
@@ -337,7 +336,7 @@ export default function AdminLeatherStockPage() {
       })
     }
 
-    // Detailed Stock Entries
+    // Detailed Stock Entries including phone numbers
     const currentY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 20 : 130
 
     doc.setFontSize(14)
@@ -351,14 +350,18 @@ export default function AdminLeatherStockPage() {
       stock.unit,
       stock.status,
       stock.workerName,
+      stock.workerPhone || 'N/A',
     ])
 
     autoTable(doc, {
-      head: [['Date', 'Type', 'Quantity', 'Unit', 'Status', 'Worker']],
+      head: [['Date', 'Type', 'Quantity', 'Unit', 'Status', 'Worker', 'Phone']],
       body: detailTableData,
       startY: currentY + 10,
-      styles: { fontSize: 9 },
+      styles: { fontSize: 8 },
       headStyles: { fillColor: [146, 64, 14] },
+      columnStyles: {
+        6: { cellWidth: 25 }, // Phone column
+      },
     })
 
     const fileName = `leather_stock_report_${format(
@@ -432,7 +435,6 @@ export default function AdminLeatherStockPage() {
       doc.text(`${type}: ${quantity} units`, 20, yPosition)
       yPosition += 10
 
-      // Get entries for this type
       const typeEntries = filteredStocks.filter(
         (s) => s.type === type && s.status === 'approved'
       )
@@ -445,10 +447,9 @@ export default function AdminLeatherStockPage() {
           yPosition = 20
         }
         doc.text(
-          `  • ${entry.workerName}: ${entry.quantity} ${entry.unit} (${format(
-            new Date(entry.date),
-            'MMM dd'
-          )})`,
+          `  • ${entry.workerName} (${entry.workerPhone || 'No phone'}): ${
+            entry.quantity
+          } ${entry.unit} (${format(new Date(entry.date), 'MMM dd')})`,
           25,
           yPosition
         )
@@ -469,7 +470,8 @@ export default function AdminLeatherStockPage() {
     const matchesSearch =
       stock.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       stock.workerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      stock.workerEmail?.toLowerCase().includes(searchTerm.toLowerCase())
+      stock.workerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      stock.workerPhone?.toLowerCase().includes(searchTerm.toLowerCase())
 
     const matchesStatus =
       filterStatus === 'all' || stock.status === filterStatus
@@ -478,388 +480,463 @@ export default function AdminLeatherStockPage() {
   })
 
   return (
-    <div className="min-h-screen p-4 bg-amber-50">
-      <h1 className="text-3xl font-bold text-amber-900 mb-8 text-center">
-        Leather Stock Management
-      </h1>
+    <div className="min-h-screen p-2 sm:p-4 bg-amber-50">
+      <div className="max-w-full mx-auto">
+        <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-amber-900 mb-4 sm:mb-6 lg:mb-8 text-center px-2">
+          Leather Stock Management
+        </h1>
 
-      {/* Controls */}
-      <div className="bg-white rounded-xl shadow-lg p-4 mb-6 border border-amber-200">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
-          {/* Search */}
-          <div>
-            <label className="block text-sm font-medium text-amber-900 mb-1">
-              Search
-            </label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Type, worker name..."
-              className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
-            />
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <label className="block text-sm font-medium text-amber-900 mb-1">
-              Status
-            </label>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-          </div>
-
-          {/* Date Range */}
-          <div>
-            <label className="block text-sm font-medium text-amber-900 mb-1">
-              Date Range
-            </label>
-            <button
-              onClick={() => setShowDatePicker(!showDatePicker)}
-              className="w-full border border-amber-300 px-3 py-2 rounded-lg text-left text-sm hover:bg-amber-50"
-            >
-              {format(dateRange[0].startDate, 'MMM dd')} -{' '}
-              {format(dateRange[0].endDate, 'MMM dd')}
-            </button>
-          </div>
-
-          {/* Download Buttons */}
-          <div>
-            <button
-              onClick={downloadStockReport}
-              className="w-full bg-blue-600 text-white py-2 px-3 rounded-lg hover:bg-blue-700 transition text-sm font-medium"
-            >
-              📄 Summary Report
-            </button>
-          </div>
-
-          <div>
-            <button
-              onClick={downloadDetailedReport}
-              className="w-full bg-green-600 text-white py-2 px-3 rounded-lg hover:bg-green-700 transition text-sm font-medium"
-            >
-              📋 Detailed Report
-            </button>
-          </div>
-
-          {/* Bulk Actions */}
-          <div>
-            <button
-              onClick={showBulkDeleteModal}
-              className="w-full bg-red-600 text-white py-2 px-3 rounded-lg hover:bg-red-700 transition text-sm font-medium"
-            >
-              🗑️ Bulk Delete
-            </button>
-          </div>
-        </div>
-
-        {/* Date Range Picker */}
-        {showDatePicker && (
-          <div className="mt-4 flex flex-col items-center">
-            <DateRangePicker
-              ranges={dateRange}
-              onChange={handleDateRangeChange}
-              showSelectionPreview={true}
-              moveRangeOnFirstSelection={false}
-              months={2}
-              direction="horizontal"
-            />
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={applyDateFilter}
-                className="bg-amber-600 text-white py-2 px-4 rounded-lg hover:bg-amber-700 transition"
-              >
-                Apply Filter
-              </button>
-              <button
-                onClick={() => setShowDatePicker(false)}
-                className="bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Selection Actions */}
-      {selectedItems.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <div className="flex justify-between items-center">
-            <span className="text-blue-900 font-medium">
-              {selectedItems.length} item(s) selected
-            </span>
-            <button
-              onClick={deleteSelectedItems}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm font-medium"
-            >
-              Delete Selected
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
-          <div className="text-amber-900 text-sm font-medium">
-            Total Entries
-          </div>
-          <div className="text-2xl font-bold text-amber-900">
-            {filteredStocks.length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
-          <div className="text-green-900 text-sm font-medium">Approved</div>
-          <div className="text-2xl font-bold text-green-900">
-            {filteredStocks.filter((s) => s.status === 'approved').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
-          <div className="text-yellow-900 text-sm font-medium">Pending</div>
-          <div className="text-2xl font-bold text-yellow-900">
-            {filteredStocks.filter((s) => s.status === 'pending').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
-          <div className="text-red-900 text-sm font-medium">Rejected</div>
-          <div className="text-2xl font-bold text-red-900">
-            {filteredStocks.filter((s) => s.status === 'rejected').length}
-          </div>
-        </div>
-      </div>
-
-      {/* Submitted Stock Table */}
-      <div className="bg-white shadow-lg rounded-xl p-6 mb-6 border border-amber-200">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-amber-900">
-            Submitted Stocks
-          </h2>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2">
+        {/* Controls - Fully Responsive */}
+        <div className="bg-white rounded-xl shadow-lg p-2 sm:p-4 mb-4 sm:mb-6 border border-amber-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-4">
+            {/* Search */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-1">
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1">
+                Search
+              </label>
               <input
-                type="checkbox"
-                checked={selectAll}
-                onChange={handleSelectAll}
-                className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Type, worker..."
+                className="w-full border border-amber-300 px-2 sm:px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-xs sm:text-sm"
               />
-              <span className="text-sm text-amber-900">Select All</span>
-            </label>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1">
+                Status
+              </label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="w-full border border-amber-300 px-2 sm:px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-xs sm:text-sm"
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+
+            {/* Date Range */}
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1">
+                Date Range
+              </label>
+              <button
+                onClick={() => setShowDatePicker(!showDatePicker)}
+                className="w-full border border-amber-300 px-2 sm:px-3 py-2 rounded-lg text-left text-xs sm:text-sm hover:bg-amber-50 truncate"
+              >
+                {format(dateRange[0].startDate, 'MMM dd')} -{' '}
+                {format(dateRange[0].endDate, 'MMM dd')}
+              </button>
+            </div>
+
+            {/* Download Buttons - Stack on small screens */}
+            <div className="grid grid-cols-2 gap-2 sm:contents">
+              <div className="sm:col-span-1">
+                <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1 sm:invisible">
+                  &nbsp;
+                </label>
+                <button
+                  onClick={downloadStockReport}
+                  className="w-full bg-blue-600 text-white py-2 px-2 sm:px-3 rounded-lg hover:bg-blue-700 transition text-xs sm:text-sm font-medium"
+                >
+                  <span className="inline">📄 Summary</span>
+                </button>
+              </div>
+
+              <div className="sm:col-span-1">
+                <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1 sm:invisible">
+                  &nbsp;
+                </label>
+                <button
+                  onClick={downloadDetailedReport}
+                  className="w-full bg-green-600 text-white py-2 px-2 sm:px-3 rounded-lg hover:bg-green-700 transition text-xs sm:text-sm font-medium"
+                >
+                  <span className="inline">📋 Detailed</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bulk Delete */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-1">
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1 lg:invisible">
+                &nbsp;
+              </label>
+              <button
+                onClick={showBulkDeleteModal}
+                className="w-full bg-red-600 text-white py-2 px-2 sm:px-3 rounded-lg hover:bg-red-700 transition text-xs sm:text-sm font-medium"
+              >
+                <span className="hidden sm:inline">🗑️ Bulk Delete</span>
+                <span className="sm:hidden">🗑️ Delete</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Date Range Picker - Responsive */}
+          {showDatePicker && (
+            <div className="mt-4 flex flex-col items-center">
+              <div className="scale-75 sm:scale-100 origin-center">
+                <DateRangePicker
+                  ranges={dateRange}
+                  onChange={handleDateRangeChange}
+                  showSelectionPreview={true}
+                  moveRangeOnFirstSelection={false}
+                  months={window.innerWidth < 640 ? 1 : 2}
+                  direction={
+                    window.innerWidth < 640 ? 'vertical' : 'horizontal'
+                  }
+                />
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={applyDateFilter}
+                  className="bg-amber-600 text-white py-2 px-4 rounded-lg hover:bg-amber-700 transition text-xs sm:text-sm"
+                >
+                  Apply Filter
+                </button>
+                <button
+                  onClick={() => setShowDatePicker(false)}
+                  className="bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition text-xs sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Selection Actions */}
+        {selectedItems.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+              <span className="text-blue-900 font-medium text-sm">
+                {selectedItems.length} item(s) selected
+              </span>
+              <button
+                onClick={deleteSelectedItems}
+                className="bg-red-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-red-700 transition text-xs sm:text-sm font-medium"
+              >
+                Delete Selected
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Stats Cards - Responsive Grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
+          <div className="bg-white rounded-lg p-3 sm:p-4 shadow border border-amber-200">
+            <div className="text-amber-900 text-xs sm:text-sm font-medium">
+              Total Entries
+            </div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-amber-900">
+              {filteredStocks.length}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg p-3 sm:p-4 shadow border border-amber-200">
+            <div className="text-green-900 text-xs sm:text-sm font-medium">
+              Approved
+            </div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-900">
+              {filteredStocks.filter((s) => s.status === 'approved').length}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg p-3 sm:p-4 shadow border border-amber-200">
+            <div className="text-yellow-900 text-xs sm:text-sm font-medium">
+              Pending
+            </div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-yellow-900">
+              {filteredStocks.filter((s) => s.status === 'pending').length}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg p-3 sm:p-4 shadow border border-amber-200">
+            <div className="text-red-900 text-xs sm:text-sm font-medium">
+              Rejected
+            </div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-red-900">
+              {filteredStocks.filter((s) => s.status === 'rejected').length}
+            </div>
           </div>
         </div>
 
-        {loading ? (
-          <div className="text-center py-8">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-amber-900"></div>
-            <p className="mt-2 text-amber-900">Loading...</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm border-collapse border border-gray-300">
-              <thead className="bg-amber-100">
-                <tr>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Select
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Type
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Quantity
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Unit
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Worker Name
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Worker Email
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStocks.map((stock) => (
-                  <tr
-                    key={stock._id}
-                    className="hover:bg-amber-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 border border-gray-300">
-                      <input
-                        type="checkbox"
-                        checked={selectedItems.includes(stock._id)}
-                        onChange={() => handleItemSelection(stock._id)}
-                        className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
-                      />
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      {format(new Date(stock.date), 'MMM dd, yyyy')}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300 font-medium">
-                      {stock.type}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      {stock.quantity}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      {stock.unit}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          stock.status === 'approved'
-                            ? 'bg-green-100 text-green-800'
-                            : stock.status === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}
-                      >
-                        {stock.status.charAt(0).toUpperCase() +
-                          stock.status.slice(1)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      {stock.workerName}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      {stock.workerEmail}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300">
-                      <div className="flex gap-2">
-                        {stock.status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() =>
-                                updateStatus(stock._id, 'approved')
-                              }
-                              disabled={loading}
-                              className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs font-medium"
-                            >
-                              ✓ Approve
-                            </button>
-                            <button
-                              onClick={() =>
-                                updateStatus(stock._id, 'rejected')
-                              }
-                              disabled={loading}
-                              className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50 text-xs font-medium"
-                            >
-                              ✗ Reject
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => deleteSingleStock(stock)}
-                          className="text-red-600 hover:text-red-800 transition-colors p-1"
-                          title="Delete Entry"
-                        >
-                          <svg
-                            className="w-4 h-4"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {filteredStocks.length === 0 && !loading && (
-          <div className="text-center py-12">
-            <div className="text-gray-400 mb-4">
-              <svg
-                className="mx-auto h-16 w-16"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+        {/* Submitted Stock Table - Responsive */}
+        <div className="bg-white shadow-lg rounded-xl p-2 sm:p-4 lg:p-6 mb-4 sm:mb-6 border border-amber-200">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2 sm:gap-0">
+            <h2 className="text-lg sm:text-xl font-semibold text-amber-900">
+              Submitted Stocks
+            </h2>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectAll}
+                  onChange={handleSelectAll}
+                  className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="text-xs sm:text-sm text-amber-900">
+                  Select All
+                </span>
+              </label>
             </div>
-            <p className="text-gray-500 text-lg">No stock entries found</p>
           </div>
-        )}
-      </div>
 
-      {/* Combined Stock Summary */}
-      <div className="bg-white shadow-lg rounded-xl p-6 border border-amber-200">
-        <h2 className="text-xl font-semibold mb-4 text-amber-900">
-          Combined Approved Stock
-        </h2>
-        {Object.keys(combinedStock).length === 0 ? (
-          <p className="text-gray-500">No approved stock yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm border-collapse border border-gray-300">
-              <thead className="bg-amber-100">
-                <tr>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Leather Type
-                  </th>
-                  <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
-                    Total Quantity
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(combinedStock).map(([type, quantity]) => (
-                  <tr
-                    key={type}
-                    className="hover:bg-amber-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 border border-gray-300 font-medium">
-                      {type}
-                    </td>
-                    <td className="px-4 py-3 border border-gray-300 font-bold text-green-600">
-                      {quantity}
-                    </td>
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-amber-900"></div>
+              <p className="mt-2 text-amber-900 text-sm">Loading...</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto -mx-2 sm:mx-0">
+              <div className="min-w-full inline-block align-middle">
+                <table className="min-w-full text-xs sm:text-sm border-collapse border border-gray-300">
+                  <thead className="bg-amber-100">
+                    <tr>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900">
+                        <span className="sr-only sm:not-sr-only">Select</span>
+                        <span className="sm:hidden">✓</span>
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[80px]">
+                        Date
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[60px]">
+                        Type
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[60px]">
+                        Qty
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[50px]">
+                        Unit
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[70px]">
+                        Status
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[100px]">
+                        Worker Name
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[120px] hidden lg:table-cell">
+                        Worker Email
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[100px]">
+                        Phone Number
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[120px]">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredStocks.map((stock) => (
+                      <tr
+                        key={stock._id}
+                        className="hover:bg-amber-50 transition-colors"
+                      >
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.includes(stock._id)}
+                            onChange={() => handleItemSelection(stock._id)}
+                            className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                          />
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <div className="text-xs sm:text-sm">
+                            {format(new Date(stock.date), 'MMM dd')}
+                            <div className="text-xs text-gray-500 sm:hidden">
+                              {format(new Date(stock.date), 'yyyy')}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 font-medium">
+                          <div
+                            className="truncate max-w-[60px] sm:max-w-none"
+                            title={stock.type}
+                          >
+                            {stock.type}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-right">
+                          {stock.quantity}
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          {stock.unit}
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <span
+                            className={`px-1 sm:px-2 py-1 rounded-full text-xs font-semibold ${
+                              stock.status === 'approved'
+                                ? 'bg-green-100 text-green-800'
+                                : stock.status === 'rejected'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}
+                          >
+                            <span className="sm:hidden">
+                              {stock.status.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="hidden sm:inline">
+                              {stock.status.charAt(0).toUpperCase() +
+                                stock.status.slice(1)}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <div
+                            className="truncate max-w-[100px] sm:max-w-none"
+                            title={stock.workerName}
+                          >
+                            {stock.workerName}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 hidden lg:table-cell">
+                          <div
+                            className="truncate max-w-[120px]"
+                            title={stock.workerEmail}
+                          >
+                            {stock.workerEmail}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <div
+                            className="truncate max-w-[100px]"
+                            title={stock.workerPhone || 'N/A'}
+                          >
+                            {stock.workerPhone || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
+                          <div className="flex flex-col sm:flex-row gap-1 sm:gap-2">
+                            {stock.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    updateStatus(stock._id, 'approved')
+                                  }
+                                  disabled={loading}
+                                  className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs font-medium"
+                                >
+                                  <span className="sm:hidden">✓</span>
+                                  <span className="hidden sm:inline">
+                                    ✓ Approve
+                                  </span>
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    updateStatus(stock._id, 'rejected')
+                                  }
+                                  disabled={loading}
+                                  className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 disabled:opacity-50 text-xs font-medium"
+                                >
+                                  <span className="sm:hidden">✗</span>
+                                  <span className="hidden sm:inline">
+                                    ✗ Reject
+                                  </span>
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => deleteSingleStock(stock)}
+                              className="text-red-600 hover:text-red-800 transition-colors p-1"
+                              title="Delete Entry"
+                            >
+                              <svg
+                                className="w-3 h-3 sm:w-4 sm:h-4"
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {filteredStocks.length === 0 && !loading && (
+            <div className="text-center py-12">
+              <div className="text-gray-400 mb-4">
+                <svg
+                  className="mx-auto h-12 w-12 sm:h-16 sm:w-16"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <p className="text-gray-500 text-sm sm:text-lg">
+                No stock entries found
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Combined Stock Summary - Responsive */}
+        <div className="bg-white shadow-lg rounded-xl p-2 sm:p-4 lg:p-6 border border-amber-200">
+          <h2 className="text-lg sm:text-xl font-semibold mb-4 text-amber-900">
+            Combined Approved Stock
+          </h2>
+          {Object.keys(combinedStock).length === 0 ? (
+            <p className="text-gray-500 text-sm sm:text-base">
+              No approved stock yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto -mx-2 sm:mx-0">
+              <table className="min-w-full text-xs sm:text-sm border-collapse border border-gray-300">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900">
+                      Leather Type
+                    </th>
+                    <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900">
+                      Total Quantity
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {Object.entries(combinedStock).map(([type, quantity]) => (
+                    <tr
+                      key={type}
+                      className="hover:bg-amber-50 transition-colors"
+                    >
+                      <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 font-medium">
+                        {type}
+                      </td>
+                      <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 font-bold text-green-600">
+                        {quantity}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Bulk Delete Modal */}
+        {showDeleteModal && (
+          <BulkDeleteModal
+            onClose={() => setShowDeleteModal(false)}
+            onDelete={performBulkDelete}
+            dateRange={dateRange}
+          />
         )}
       </div>
-
-      {/* Bulk Delete Modal */}
-      {showDeleteModal && (
-        <BulkDeleteModal
-          onClose={() => setShowDeleteModal(false)}
-          onDelete={performBulkDelete}
-          dateRange={dateRange}
-        />
-      )}
     </div>
   )
 }
 
-// Bulk Delete Modal Component
+// Bulk Delete Modal Component - Responsive
 function BulkDeleteModal({ onClose, onDelete, dateRange }) {
   const [deleteRange, setDeleteRange] = useState(dateRange)
   const [deleteStatus, setDeleteStatus] = useState('all')
@@ -907,8 +984,8 @@ function BulkDeleteModal({ onClose, onDelete, dateRange }) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full p-6">
-        <h2 className="text-2xl font-bold text-amber-900 mb-4">
+      <div className="bg-white rounded-2xl max-w-sm sm:max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-xl sm:text-2xl font-bold text-amber-900 mb-4">
           Bulk Delete Options
         </h2>
 
@@ -917,13 +994,15 @@ function BulkDeleteModal({ onClose, onDelete, dateRange }) {
             <label className="block text-sm font-medium text-amber-900 mb-1">
               Date Range
             </label>
-            <DateRangePicker
-              ranges={deleteRange}
-              onChange={(ranges) => setDeleteRange([ranges.selection])}
-              showSelectionPreview={false}
-              months={1}
-              direction="horizontal"
-            />
+            <div className="scale-75 sm:scale-100 origin-left">
+              <DateRangePicker
+                ranges={deleteRange}
+                onChange={(ranges) => setDeleteRange([ranges.selection])}
+                showSelectionPreview={false}
+                months={1}
+                direction="vertical"
+              />
+            </div>
           </div>
 
           <div>
@@ -933,7 +1012,7 @@ function BulkDeleteModal({ onClose, onDelete, dateRange }) {
             <select
               value={deleteStatus}
               onChange={(e) => setDeleteStatus(e.target.value)}
-              className="w-full border border-amber-300 px-3 py-2 rounded-lg"
+              className="w-full border border-amber-300 px-3 py-2 rounded-lg text-sm"
             >
               <option value="all">All Status</option>
               <option value="pending">Pending Only</option>
@@ -950,24 +1029,24 @@ function BulkDeleteModal({ onClose, onDelete, dateRange }) {
               type="text"
               value={deleteType}
               onChange={(e) => setDeleteType(e.target.value)}
-              placeholder="Enter leather type to filter..."
-              className="w-full border border-amber-300 px-3 py-2 rounded-lg"
+              placeholder="Enter leather type..."
+              className="w-full border border-amber-300 px-3 py-2 rounded-lg text-sm"
             />
           </div>
         </div>
 
-        <div className="flex gap-3 mt-6">
+        <div className="flex flex-col sm:flex-row gap-3 mt-6">
           <button
             onClick={onClose}
-            className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition"
+            className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition text-sm"
           >
             Cancel
           </button>
           <button
             onClick={handleDelete}
-            className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition"
+            className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition text-sm"
           >
-            Delete Matching Items
+            Delete Items
           </button>
         </div>
       </div>

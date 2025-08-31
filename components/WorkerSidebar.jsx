@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import {
   FaHome,
   FaUser,
@@ -9,10 +10,40 @@ import {
   FaCube,
   FaBoxOpen,
   FaClipboardList,
+  FaBars,
+  FaTimes,
 } from 'react-icons/fa'
 
 export default function WorkerSidebar() {
   const pathname = usePathname()
+  const [isOpen, setIsOpen] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Detect screen size and set initial state
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 1024 // lg breakpoint
+      setIsMobile(mobile)
+
+      // Auto-open on desktop, closed on mobile
+      if (!mobile) {
+        setIsOpen(true)
+      } else {
+        setIsOpen(false)
+      }
+    }
+
+    handleResize() // Check initial size
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  // Close sidebar when route changes on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setIsOpen(false)
+    }
+  }, [pathname, isMobile])
 
   const sidebarOptions = [
     { href: '/worker/LeatherStock', icon: FaCubes, label: 'Leather Stock' },
@@ -24,38 +55,81 @@ export default function WorkerSidebar() {
       label: 'Finished',
     },
     { href: '/worker/reports', icon: FaClipboardList, label: 'Reports' },
-    { href: '/worker/profile', icon: FaUser, label: 'Profile' },
+
     { href: '/', icon: FaHome, label: 'Home' },
   ]
 
   const isActive = (href) => pathname === href
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 w-24 h-screen overflow-y-auto bg-white border-r border-gray-200">
-      <div className="flex items-center justify-center p-4">
-        <img
-          className="w-[50px] h-[50px]"
-          src="/Home_Category/Home_img_1.jpg"
-          alt="Company Logo"
-        />
-      </div>
+    <>
+      {/* Mobile Menu Button */}
+      {isMobile && (
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="fixed top-4 left-4 z-50 p-2 bg-black text-white rounded-md shadow-lg"
+          aria-label="Toggle sidebar"
+        >
+          {isOpen ? <FaTimes size={20} /> : <FaBars size={20} />}
+        </button>
+      )}
 
-      <nav className="flex flex-col mt-6 items-center space-y-4">
-        {sidebarOptions.map(({ href, icon: Icon, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`flex flex-col items-center text-sm font-medium px-2 py-2 rounded-lg transition-colors ${
-              isActive(href)
-                ? 'text-black font-bold'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <Icon className="text-xl mb-1" />
-            <span className="text-xs">{label}</span>
-          </Link>
-        ))}
-      </nav>
-    </aside>
+      {/* Overlay for mobile - LOWER z-index than sidebar */}
+      {isMobile && isOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - HIGHER z-index than overlay */}
+      <aside
+        className={`
+          fixed inset-y-0 left-0 h-screen overflow-y-auto bg-white border-r border-gray-200 shadow-lg
+          transform transition-transform duration-300 ease-in-out
+          ${
+            isMobile
+              ? isOpen
+                ? 'translate-x-0'
+                : '-translate-x-full'
+              : 'translate-x-0'
+          }
+          w-64 sm:w-60 md:w-64
+          z-30
+        `}
+      >
+        {/* Logo Section - Same as AdminSidebar */}
+        <div className="flex flex-col items-center justify-center p-4 sm:p-5 md:p-6 gap-4">
+          <img
+            className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full border-2 border-gray-300 object-cover"
+            src="/Home_Category/Home_img_1.jpg"
+            alt="Worker Profile"
+          />
+          <h2>Worker Dashboard</h2>
+        </div>
+
+        {/* Navigation - Same structure as AdminSidebar */}
+        <nav className="mt-4 sm:mt-5 md:mt-6 flex flex-col items-start">
+          {sidebarOptions.map(({ href, icon: Icon, label }) => (
+            <Link
+              key={href}
+              href={href}
+              onClick={() => isMobile && setIsOpen(false)} // Close sidebar on mobile when clicking link
+              className={`flex items-center gap-3 sm:gap-4 w-full px-4 sm:px-5 md:px-6 py-2 sm:py-2.5 md:py-3 text-base sm:text-lg font-medium rounded-r-lg transition-colors ${
+                isActive(href)
+                  ? 'bg-gray-900 text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`}
+            >
+              <Icon className="text-sm sm:text-base md:text-lg flex-shrink-0" />
+              <span className="truncate">{label}</span>
+            </Link>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Spacer for desktop layout */}
+      {!isMobile && <div className="w-64 flex-shrink-0" />}
+    </>
   )
 }

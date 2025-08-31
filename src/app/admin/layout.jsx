@@ -1,30 +1,43 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AdminRoute from '../../../components/AdminRoute'
 import AdminSidebar from '../../../components/AdminSidebar'
 import AdminHeader from '../../../components/AdminHeader'
 
 export default function AdminLayout({ children }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const SIDEBAR_WIDTH = 256 // in px, same as AdminSidebar w-64
+  const [isMobile, setIsMobile] = useState(false)
 
-  const toggleSidebar = () => setSidebarOpen(!sidebarOpen)
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 1024)
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   return (
     <AdminRoute>
-      <div className="flex h-screen overflow-hidden">
+      <div className="min-h-screen bg-gray-50">
         {/* Sidebar */}
-        {sidebarOpen && <AdminSidebar />}
+        <AdminSidebar />
 
-        {/* Main content */}
+        {/* Main content wrapper */}
         <div
-          className={`flex-1 flex flex-col transition-all duration-300`}
-          style={{
-            marginLeft: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
-          }}
+          className={`
+          transition-all duration-300 ease-in-out
+          ${isMobile ? 'ml-0' : 'lg:ml-64'}
+          min-h-screen
+        `}
         >
-          <AdminHeader toggleSidebar={toggleSidebar} />
-          <main className="flex-1 p-6 overflow-y-auto">{children}</main>
+          {/* Header */}
+          <AdminHeader />
+
+          {/* Main content */}
+          <main className="bg-white">
+            <div className="p-4 sm:p-6 lg:p-8 w-full">{children}</div>
+          </main>
         </div>
       </div>
     </AdminRoute>

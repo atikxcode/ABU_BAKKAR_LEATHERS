@@ -9,7 +9,8 @@ import { AuthContext } from '../../../../Provider/AuthProvider'
 export default function MaterialStockPage() {
   const { user } = useContext(AuthContext)
   const userEmail = user?.email
-  const userName = user?.name
+  // Try multiple possible name properties from AuthContext
+  const userName = user?.name || user?.displayName || user?.fullName || ''
 
   const [stocks, setStocks] = useState([])
   const [myStocks, setMyStocks] = useState([])
@@ -19,6 +20,7 @@ export default function MaterialStockPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterMaterial, setFilterMaterial] = useState('all')
+  const [currentUser, setCurrentUser] = useState(null) // Add this state
 
   const {
     register,
@@ -33,6 +35,21 @@ export default function MaterialStockPage() {
       unit: 'kg',
     },
   })
+
+  // Fetch current user from database
+  const fetchCurrentUser = async () => {
+    if (!userEmail) return
+    try {
+      const res = await fetch(`/api/user?email=${userEmail}`)
+      if (res.ok) {
+        const { user: userFromDB } = await res.json()
+        setCurrentUser(userFromDB)
+        console.log('Current user from DB:', userFromDB) // Debug log
+      }
+    } catch (err) {
+      console.error('Error fetching current user:', err)
+    }
+  }
 
   // Fetch all material stocks
   const fetchStocks = async () => {
@@ -63,15 +80,38 @@ export default function MaterialStockPage() {
   useEffect(() => {
     if (userEmail) {
       fetchStocks()
+      fetchCurrentUser() // Fetch user data from database
     }
   }, [userEmail])
 
+  // Debug: Log user information
+  useEffect(() => {
+    console.log('Auth user:', user)
+    console.log('User email:', userEmail)
+    console.log('User name:', userName)
+    console.log('Current user from DB:', currentUser)
+  }, [user, userEmail, userName, currentUser])
+
   // Submit material stock report
   const onSubmit = async (data) => {
-    if (!userEmail || !userName) {
-      Swal.fire('Error', 'User information not available', 'error')
+    // Use database user info if available, fallback to auth context
+    const workerName = currentUser?.name || userName || 'Unknown Worker'
+    const workerEmail = userEmail
+
+    if (!workerEmail) {
+      Swal.fire(
+        'Error',
+        'User email not available. Please log in again.',
+        'error'
+      )
       return
     }
+
+    if (!workerName || workerName === 'Unknown Worker') {
+      console.warn('Worker name not found, using email as fallback')
+    }
+
+    console.log('Submitting with:', { workerName, workerEmail }) // Debug log
 
     setLoading(true)
     try {
@@ -83,8 +123,8 @@ export default function MaterialStockPage() {
           material: data.material.trim().toLowerCase(),
           quantity: Number(data.quantity),
           status: 'pending',
-          workerName: userName,
-          workerEmail: userEmail,
+          workerName: workerName,
+          workerEmail: workerEmail,
         }),
       })
 
@@ -156,6 +196,17 @@ export default function MaterialStockPage() {
           Material Stock Reports
         </h1>
 
+        {/* Debug Info - Remove this in production */}
+        {/* <div className="mb-4 p-4 bg-blue-100 rounded-lg text-sm">
+          <p>
+            <strong>Debug Info:</strong>
+          </p>
+          <p>Email: {userEmail || 'Not available'}</p>
+          <p>Auth Name: {userName || 'Not available'}</p>
+          <p>DB Name: {currentUser?.name || 'Not available'}</p>
+        </div> */}
+
+        {/* Rest of your component remains exactly the same... */}
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
@@ -270,7 +321,7 @@ export default function MaterialStockPage() {
               </select>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !userEmail}
                 className="w-full bg-amber-900 text-white py-2 px-4 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 font-medium"
               >
                 {loading ? 'Submitting...' : 'Submit Report'}

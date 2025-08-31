@@ -1,14 +1,12 @@
 // src/components/AdminHeader.jsx
 export default function AdminHeader() {
   return (
-    <header className="w-full bg-white shadow p-4 flex justify-between items-center">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
-      <div className="flex items-center space-x-4">
-        <button className="px-3 py-1 bg-blue-500 text-white rounded">
-          Add User
+    <header className="w-full bg-white shadow p-2 sm:p-3 md:p-4">
+      <div className="flex justify-end">
+        <button className="px-2 py-1 sm:px-3 sm:py-1 bg-blue-500 text-white rounded text-sm sm:text-base">
+          <span className="hidden sm:inline">Add User</span>
+          <span className="sm:hidden">Add</span>
         </button>
-        <div className="w-8 h-8 rounded-full bg-gray-300"></div>{' '}
-        {/* user avatar */}
       </div>
     </header>
   )

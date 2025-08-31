@@ -29,6 +29,7 @@ export async function GET(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
+    const usersCollection = db.collection('user') // Add users collection
 
     // Build query filter
     let query = {}
@@ -41,12 +42,42 @@ export async function GET(req) {
     }
 
     if (status && status !== 'all') query.status = status
-    if (type) query.type = new RegExp(type, 'i') // Case insensitive search
+    if (type) query.type = new RegExp(type, 'i')
     if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
 
     const items = await collection.find(query).sort({ date: -1 }).toArray()
-    console.log('✅ Returning leather stock items:', items.length)
-    return NextResponse.json(items)
+
+    // Enrich with phone numbers from user collection
+    const enrichedItems = await Promise.all(
+      items.map(async (item) => {
+        try {
+          // Find user by email to get phone number
+          const worker = await usersCollection.findOne({
+            email: item.workerEmail,
+          })
+          return {
+            ...item,
+            workerPhone: worker?.phone || worker?.phoneNumber || 'N/A',
+          }
+        } catch (err) {
+          console.error(
+            'Error fetching worker info for email:',
+            item.workerEmail,
+            err
+          )
+          return {
+            ...item,
+            workerPhone: 'N/A',
+          }
+        }
+      })
+    )
+
+    console.log(
+      '✅ Returning leather stock items with phone numbers:',
+      enrichedItems.length
+    )
+    return NextResponse.json(enrichedItems)
   } catch (err) {
     console.error('❌ GET leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

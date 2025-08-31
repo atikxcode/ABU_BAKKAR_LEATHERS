@@ -20,7 +20,7 @@ export default function WorkerFinishedProductsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [dateRange, setDateRange] = useState([
     {
-      startDate: new Date(new Date().setMonth(new Date().getMonth() - 3)),
+      startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)),
       endDate: new Date(),
       key: 'selection',
     },
@@ -56,7 +56,6 @@ export default function WorkerFinishedProductsPage() {
         console.log('✅ Raw API data:', data)
         console.log('📊 Items count:', data.length)
 
-        // Log each item's details
         data.forEach((item, index) => {
           console.log(`📦 Item ${index + 1}:`, {
             productName: item.productName,
@@ -147,7 +146,6 @@ export default function WorkerFinishedProductsPage() {
       product.workerNotes || '-',
     ])
 
-    // Fixed autoTable usage
     autoTable(doc, {
       head: [
         [
@@ -308,18 +306,7 @@ export default function WorkerFinishedProductsPage() {
         My Finished Products
       </h1>
 
-      {/* Debug Panel */}
-      {/* <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm">
-        <p>
-          <strong>🔍 Debug Info:</strong>
-        </p>
-        <p>User Email: {userEmail || 'Not loaded'}</p>
-        <p>Products Found: {finishedProducts.length}</p>
-        <p>Filtered Products: {filteredProducts.length}</p>
-        <p>Loading: {loading ? 'Yes' : 'No'}</p>
-      </div> */}
-
-      {/* Controls */}
+      {/* Controls - Same as Admin */}
       <div className="bg-white rounded-xl shadow-lg p-4 mb-6 border border-amber-200">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           {/* Search */}
@@ -356,7 +343,7 @@ export default function WorkerFinishedProductsPage() {
               onClick={downloadWorkerReport}
               className="w-full bg-blue-600 text-white py-2 px-3 rounded-lg hover:bg-blue-700 transition text-sm font-medium"
             >
-              📊 My Report
+              📄 My Report
             </button>
           </div>
 
@@ -365,7 +352,7 @@ export default function WorkerFinishedProductsPage() {
               onClick={downloadDetailedWorkerReport}
               className="w-full bg-green-600 text-white py-2 px-3 rounded-lg hover:bg-green-700 transition text-sm font-medium"
             >
-              📈 Detailed Report
+              📋 Detailed Report
             </button>
           </div>
         </div>
@@ -399,7 +386,7 @@ export default function WorkerFinishedProductsPage() {
         )}
       </div>
 
-      {/* Worker Stats */}
+      {/* Worker Stats - Same layout as Admin */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-lg p-4 shadow border border-amber-200">
           <div className="text-amber-900 text-sm font-medium">
@@ -448,7 +435,7 @@ export default function WorkerFinishedProductsPage() {
         </div>
       </div>
 
-      {/* Products List */}
+      {/* Products List - Same grid system as Admin */}
       {loading ? (
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-amber-900"></div>
@@ -459,7 +446,7 @@ export default function WorkerFinishedProductsPage() {
           {filteredProducts.map((product) => (
             <div
               key={product._id}
-              className="bg-white w-96 rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
+              className="bg-white rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
             >
               {product.image && (
                 <img
@@ -537,6 +524,7 @@ export default function WorkerFinishedProductsPage() {
         </div>
       )}
 
+      {/* Empty State - Same as Admin */}
       {filteredProducts.length === 0 && !loading && (
         <div className="text-center py-12">
           <div className="text-gray-400 mb-4">
