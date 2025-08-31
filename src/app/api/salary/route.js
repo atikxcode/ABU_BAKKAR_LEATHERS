@@ -1,88 +1,214 @@
-// app/api/<feature>/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// Helper function to check admin role (simple example, adapt as needed)
-const isAdmin = (req) => {
-  const role = req.headers.get('role') // assuming role sent in headers
-  return role === 'admin'
-}
-
-export async function GET(req) {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url)
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('salary') // replace with collection
+    
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const workerEmail = searchParams.get('workerEmail')
+    const salaryType = searchParams.get('type') // 'worker' or 'laborer'
+    const addedBy = searchParams.get('addedBy') // Who added the record
+    const viewMode = searchParams.get('viewMode') // 'admin' or 'worker'
 
-    const items = await collection.find().toArray()
-    return NextResponse.json(items)
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
+    let query = {}
 
-export async function POST(req) {
-  try {
-    const body = await req.json()
-    const client = await clientPromise
-    const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('salary') // replace with collection
-
-    const result = await collection.insertOne({
-      ...body,
-      date: new Date(),
-      status: body.status || 'pending',
-    })
-
-    return NextResponse.json(result, { status: 201 })
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
-
-export async function PATCH(req) {
-  try {
-    const { searchParams } = new URL(req.url)
-    const id = searchParams.get('id')
-    const body = await req.json()
-
-    if (!id)
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 })
-
-    const client = await clientPromise
-    const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('salary') // replace with collection
-
-    const result = await collection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: body }
-    )
-
-    return NextResponse.json(result)
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
-
-export async function DELETE(req) {
-  try {
-    if (!isAdmin(req)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // Date range filter
+    if (startDate && endDate) {
+      query.paymentDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      }
     }
 
-    const { searchParams } = new URL(req.url)
-    const id = searchParams.get('id')
-    if (!id)
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 })
+    // Salary type filter
+    if (salaryType) {
+      query.type = salaryType
+    }
 
+    // **FIX: Handle labor records filtering properly**
+    if (salaryType === 'laborer') {
+      if (addedBy) {
+        // Filter labor records by who added them
+        query.addedBy = addedBy
+      }
+    } else if (salaryType === 'worker') {
+      // For worker salary records, filter by workerEmail
+      if (workerEmail) {
+        query.workerEmail = workerEmail
+      }
+    }
+
+    const salaries = await db
+      .collection('salary')
+      .find(query)
+      .sort({ paymentDate: -1, createdAt: -1 })
+      .toArray()
+
+    return NextResponse.json(salaries)
+  } catch (error) {
+    console.error('Error fetching salaries:', error)
+    return NextResponse.json(
+      { message: 'Failed to fetch salaries' },
+      { status: 500 }
+    )
+  }
+}
+
+
+export async function POST(request) {
+  try {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('salary') // replace with collection
+    const salaryData = await request.json()
 
-    const result = await collection.deleteOne({ _id: new ObjectId(id) })
-    return NextResponse.json({ message: 'Deleted successfully', result })
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    // Validate required fields
+    const requiredFields = ['amount', 'paymentDate', 'type']
+    for (const field of requiredFields) {
+      if (!salaryData[field]) {
+        return NextResponse.json(
+          { message: `${field} is required` },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Additional validation based on salary type
+    if (salaryData.type === 'worker') {
+      if (!salaryData.workerEmail || !salaryData.workerName) {
+        return NextResponse.json(
+          { message: 'Worker email and name are required for worker salary' },
+          { status: 400 }
+        )
+      }
+    } else if (salaryData.type === 'laborer') {
+      if (!salaryData.laborName) {
+        return NextResponse.json(
+          { message: 'Laborer name is required for laborer salary' },
+          { status: 400 }
+        )
+      }
+      
+      // Set addedBy field for labor records
+      // If not provided, default to 'admin'
+      if (!salaryData.addedBy) {
+        salaryData.addedBy = 'admin'
+      }
+    }
+
+    const newSalary = {
+      ...salaryData,
+      amount: parseFloat(salaryData.amount),
+      paymentDate: new Date(salaryData.paymentDate),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      status: salaryData.status || 'paid'
+    }
+
+    const result = await db.collection('salary').insertOne(newSalary)
+
+    return NextResponse.json({
+      message: 'Salary record created successfully',
+      id: result.insertedId
+    })
+  } catch (error) {
+    console.error('Error creating salary:', error)
+    return NextResponse.json(
+      { message: 'Failed to create salary record' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(request) {
+  try {
+    const client = await clientPromise
+    const db = client.db('AbuBakkarLeathers')
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+    
+    if (!id) {
+      return NextResponse.json(
+        { message: 'Salary ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const updates = await request.json()
+    delete updates._id // Remove _id from updates
+
+    const updateData = {
+      ...updates,
+      updatedAt: new Date()
+    }
+
+    if (updates.amount) {
+      updateData.amount = parseFloat(updates.amount)
+    }
+
+    if (updates.paymentDate) {
+      updateData.paymentDate = new Date(updates.paymentDate)
+    }
+
+    const result = await db
+      .collection('salary')
+      .updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateData }
+      )
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json(
+        { message: 'Salary record not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ message: 'Salary record updated successfully' })
+  } catch (error) {
+    console.error('Error updating salary:', error)
+    return NextResponse.json(
+      { message: 'Failed to update salary record' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request) {
+  try {
+    const client = await clientPromise
+    const db = client.db('AbuBakkarLeathers')
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+    
+    if (!id) {
+      return NextResponse.json(
+        { message: 'Salary ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const result = await db
+      .collection('salary')
+      .deleteOne({ _id: new ObjectId(id) })
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json(
+        { message: 'Salary record not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ message: 'Salary record deleted successfully' })
+  } catch (error) {
+    console.error('Error deleting salary:', error)
+    return NextResponse.json(
+      { message: 'Failed to delete salary record' },
+      { status: 500 }
+    )
   }
 }

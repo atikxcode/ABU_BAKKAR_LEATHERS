@@ -12,6 +12,7 @@ import {
   FaClipboardList,
   FaBars,
   FaTimes,
+  FaMoneyBill
 } from 'react-icons/fa'
 
 export default function WorkerSidebar() {
@@ -54,8 +55,8 @@ export default function WorkerSidebar() {
       icon: FaBoxOpen,
       label: 'Finished',
     },
-    { href: '/worker/reports', icon: FaClipboardList, label: 'Reports' },
-
+    { href: '/worker/WorkerReport', icon: FaClipboardList, label: 'Reports' },
+    { href: '/worker/WorkerSalary', icon: FaMoneyBill, label: 'Salary' },
     { href: '/', icon: FaHome, label: 'Home' },
   ]
 

@@ -67,8 +67,9 @@ export default function AdminSidebar() {
       icon: FaCubes,
       label: 'Finished Products',
     },
-    { href: '/admin/reports', icon: FaPen, label: 'Reports' },
-    { href: '/admin/settings', icon: FaMoneyBill, label: 'Salary' },
+    { href: '/admin/UserManage', icon: FaUsers, label: 'Users' },
+    { href: '/admin/AdminReport', icon: FaPen, label: 'Reports' },
+    { href: '/admin/SalaryManagement', icon: FaMoneyBill, label: 'Salary' },
     { href: '/', icon: FaHome, label: 'Home' },
   ]
 
