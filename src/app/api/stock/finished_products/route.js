@@ -9,6 +9,8 @@ const isAdmin = (req) => {
 }
 
 export async function GET(req) {
+  console.log('🔍 GET /api/stock/finished_products - Starting')
+
   try {
     const { searchParams } = new URL(req.url)
     const startDate = searchParams.get('startDate')
@@ -16,7 +18,7 @@ export async function GET(req) {
     const workerEmail = searchParams.get('workerEmail')
     const isWorkerRequest = searchParams.get('workerOnly') === 'true'
 
-    console.log('🔍 Finished products request:', {
+    console.log('📝 Finished products request:', {
       startDate,
       endDate,
       workerEmail,
@@ -48,7 +50,7 @@ export async function GET(req) {
         .find({
           workerEmail: workerEmail,
           status: 'approved',
-          deliveredQuantity: { $exists: true, $gt: 0 }, // Only applications with actual deliveries
+          deliveredQuantity: { $exists: true, $gt: 0 },
         })
         .toArray()
 
@@ -73,11 +75,11 @@ export async function GET(req) {
               ...item,
               workerContribution: workerApp
                 ? workerApp.deliveredQuantity || 0
-                : 0, // Use deliveredQuantity
+                : 0,
               workerNotes: workerApp ? workerApp.note || '' : '',
             }
           })
-          .filter((item) => item.workerContribution > 0) // Only show items with actual contributions
+          .filter((item) => item.workerContribution > 0)
       } else {
         items = []
       }
@@ -88,7 +90,7 @@ export async function GET(req) {
         .sort({ finishedAt: -1 })
         .toArray()
 
-      // Enrich with worker contribution data for admin view
+      // Enrich with worker contribution data for admin view - ADDED COMPANY
       for (let item of items) {
         const applications = await applicationsCollection
           .find({
@@ -99,9 +101,10 @@ export async function GET(req) {
 
         item.workerContributions = applications.map((app) => ({
           workerName: app.workerName,
+          workerCompany: app.workerCompany || 'N/A', // ✅ ADDED COMPANY FIELD
           workerEmail: app.workerEmail,
-          quantity: app.quantity, // Approved quantity
-          deliveredQuantity: app.deliveredQuantity || 0, // Actual delivered quantity
+          quantity: app.quantity,
+          deliveredQuantity: app.deliveredQuantity || 0,
           note: app.note,
         }))
       }
@@ -111,13 +114,17 @@ export async function GET(req) {
     return NextResponse.json(items)
   } catch (err) {
     console.error('❌ Error in finished products API:', err)
+    console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function POST(req) {
+  console.log('🚀 POST /api/stock/finished_products - Starting')
+
   try {
     if (!isAdmin(req)) {
+      console.error('❌ Unauthorized access attempt')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -125,6 +132,24 @@ export async function POST(req) {
     }
 
     const body = await req.json()
+    console.log('📝 Finished product request:', body)
+
+    if (!body.productionJobId) {
+      console.error('❌ Missing production job ID')
+      return NextResponse.json(
+        { error: 'Production job ID is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!ObjectId.isValid(body.productionJobId)) {
+      console.error('❌ Invalid production job ID format')
+      return NextResponse.json(
+        { error: 'Invalid production job ID format' },
+        { status: 400 }
+      )
+    }
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const finishedCollection = db.collection('finished_products')
@@ -136,11 +161,14 @@ export async function POST(req) {
     })
 
     if (!productionJob) {
+      console.error('❌ Production job not found:', body.productionJobId)
       return NextResponse.json(
         { error: 'Production job not found' },
         { status: 404 }
       )
     }
+
+    console.log('📦 Found production job:', productionJob.productName)
 
     // Create finished product entry
     const finishedProduct = {
@@ -158,6 +186,7 @@ export async function POST(req) {
     }
 
     const result = await finishedCollection.insertOne(finishedProduct)
+    console.log('✅ Finished product created:', result.insertedId)
 
     // Update production job status to finished
     await productionCollection.updateOne(
@@ -170,15 +199,22 @@ export async function POST(req) {
       }
     )
 
+    console.log('✅ Production job marked as finished')
+    console.log('✅ POST /api/stock/finished_products - Success')
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
+    console.error('❌ POST /api/stock/finished_products error:', err)
+    console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function DELETE(req) {
+  console.log('🗑️ DELETE /api/stock/finished_products - Starting')
+
   try {
     if (!isAdmin(req)) {
+      console.error('❌ Unauthorized access attempt')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -187,16 +223,36 @@ export async function DELETE(req) {
 
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
-    if (!id)
+
+    if (!id) {
+      console.error('❌ Missing ID parameter')
       return NextResponse.json({ error: 'ID is required' }, { status: 400 })
+    }
+
+    if (!ObjectId.isValid(id)) {
+      console.error('❌ Invalid ObjectId:', id)
+      return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
+    }
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('finished_products')
 
+    const existingItem = await collection.findOne({ _id: new ObjectId(id) })
+    if (!existingItem) {
+      console.error('❌ Finished product not found:', id)
+      return NextResponse.json(
+        { error: 'Finished product not found' },
+        { status: 404 }
+      )
+    }
+
     const result = await collection.deleteOne({ _id: new ObjectId(id) })
+    console.log('✅ DELETE /api/stock/finished_products - Success')
     return NextResponse.json({ message: 'Deleted successfully', result })
   } catch (err) {
+    console.error('❌ DELETE /api/stock/finished_products error:', err)
+    console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

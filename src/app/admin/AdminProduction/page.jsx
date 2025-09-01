@@ -18,7 +18,7 @@ export default function AdminProductionPage() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
   const [imageLoadErrors, setImageLoadErrors] = useState({})
-  const [deliveryInputs, setDeliveryInputs] = useState({}) // Track delivery quantity inputs
+  const [deliveryInputs, setDeliveryInputs] = useState({})
   const [formData, setFormData] = useState({
     product: '',
     description: '',
@@ -39,11 +39,23 @@ export default function AdminProductionPage() {
   }
 
   const fetchJobs = async () => {
+    console.log('📡 Fetching jobs...')
     try {
       const res = await fetch('/api/stock/production')
-      if (res.ok) setJobs(await res.json())
+      console.log('📡 Jobs fetch response status:', res.status)
+
+      if (res.ok) {
+        const data = await res.json()
+        console.log('📡 Jobs data received:', data.length, 'jobs')
+        setJobs(data)
+      } else {
+        const errorData = await res.json()
+        console.error('❌ Failed to fetch jobs:', errorData)
+        Swal.fire('Error', 'Failed to fetch jobs', 'error')
+      }
     } catch (err) {
-      console.error(err)
+      console.error('❌ Network error fetching jobs:', err)
+      Swal.fire('Error', 'Network error occurred', 'error')
     }
   }
 
@@ -60,32 +72,61 @@ export default function AdminProductionPage() {
   }
 
   const handleImageChange = (e) => {
-    setImageFile(e.target.files[0])
+    const file = e.target.files[0]
+    console.log('📷 Image selected:', file?.name, file?.size)
+    setImageFile(file)
   }
 
   // Convert file to Base64
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
+      console.log('📷 Converting image to base64...')
       const reader = new FileReader()
       reader.readAsDataURL(file)
       reader.onload = () => {
         const base64 = reader.result.split(',')[1]
+        console.log('📷 Base64 conversion complete, length:', base64.length)
         resolve(base64)
       }
-      reader.onerror = (error) => reject(error)
+      reader.onerror = (error) => {
+        console.error('❌ Base64 conversion failed:', error)
+        reject(error)
+      }
     })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    console.log('🚀 Form submission started')
+    console.log('📝 Form data:', formData)
+
     if (!formData.product || !formData.quantity) {
+      console.error('❌ Missing required fields')
       Swal.fire('Warning', 'Please fill in all required fields', 'warning')
       return
     }
+
     setLoading(true)
 
     try {
       let imageBase64 = null
-      if (imageFile) imageBase64 = await fileToBase64(imageFile)
+      if (imageFile) {
+        console.log('📷 Processing image file...')
+        imageBase64 = await fileToBase64(imageFile)
+      }
+
+      const requestBody = {
+        productName: formData.product,
+        description: formData.description,
+        quantity: formData.quantity,
+        image: imageBase64,
+      }
+
+      console.log('📡 Sending request to API:', {
+        productName: requestBody.productName,
+        quantity: requestBody.quantity,
+        description: requestBody.description?.substring(0, 50),
+        hasImage: !!requestBody.image,
+      })
 
       const response = await fetch('/api/stock/production', {
         method: 'POST',
@@ -93,24 +134,32 @@ export default function AdminProductionPage() {
           'Content-Type': 'application/json',
           role: 'admin',
         },
-        body: JSON.stringify({
-          productName: formData.product,
-          description: formData.description,
-          quantity: formData.quantity,
-          image: imageBase64,
-        }),
+        body: JSON.stringify(requestBody),
       })
 
+      console.log('📡 API response status:', response.status)
+      const responseData = await response.json()
+      console.log('📡 API response data:', responseData)
+
       if (response.ok) {
+        console.log('✅ Job created successfully')
         Swal.fire('Success!', 'Job created successfully', 'success')
         setFormData({ product: '', description: '', quantity: '' })
         setImageFile(null)
+        // Reset file input
+        const fileInput = document.querySelector('input[type="file"]')
+        if (fileInput) fileInput.value = ''
         fetchJobs()
       } else {
-        Swal.fire('Error', 'Failed to create job', 'error')
+        console.error('❌ API error:', responseData)
+        Swal.fire(
+          'Error',
+          responseData.error || 'Failed to create job',
+          'error'
+        )
       }
     } catch (err) {
-      console.error(err)
+      console.error('❌ Submit error:', err)
       Swal.fire('Error', 'An error occurred while creating the job', 'error')
     } finally {
       setLoading(false)
@@ -119,22 +168,32 @@ export default function AdminProductionPage() {
 
   // PATCH status update
   const handleStatusChange = async (jobId, newStatus) => {
+    console.log('🔄 Updating job status:', { jobId, newStatus })
     try {
-      await fetch(`/api/stock/production?id=${jobId}`, {
+      const response = await fetch(`/api/stock/production?id=${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', role: 'admin' },
         body: JSON.stringify({ status: newStatus }),
       })
-      fetchJobs()
-      Swal.fire('Updated!', `Job status changed to ${newStatus}`, 'success')
+
+      if (response.ok) {
+        console.log('✅ Status updated successfully')
+        fetchJobs()
+        Swal.fire('Updated!', `Job status changed to ${newStatus}`, 'success')
+      } else {
+        const errorData = await response.json()
+        console.error('❌ Status update failed:', errorData)
+        Swal.fire('Error', 'Failed to update status', 'error')
+      }
     } catch (err) {
-      console.error(err)
+      console.error('❌ Status update error:', err)
       Swal.fire('Error', 'Failed to update status', 'error')
     }
   }
 
   // Mark as finished function
   const handleMarkAsFinished = async (job) => {
+    console.log('🏁 Marking job as finished:', job.productName)
     const result = await Swal.fire({
       title: 'Mark Job as Finished?',
       html: `
@@ -167,6 +226,7 @@ export default function AdminProductionPage() {
         })
 
         if (response.ok) {
+          console.log('✅ Job marked as finished successfully')
           Swal.fire(
             'Success!',
             'Job marked as finished successfully',
@@ -175,6 +235,7 @@ export default function AdminProductionPage() {
           fetchJobs()
         } else {
           const error = await response.json()
+          console.error('❌ Failed to mark as finished:', error)
           Swal.fire(
             'Error',
             error.message || 'Failed to mark job as finished',
@@ -182,7 +243,7 @@ export default function AdminProductionPage() {
           )
         }
       } catch (err) {
-        console.error(err)
+        console.error('❌ Mark as finished error:', err)
         Swal.fire('Error', 'An error occurred', 'error')
       }
     }
@@ -190,6 +251,7 @@ export default function AdminProductionPage() {
 
   // Edit job functions
   const handleEditConfirm = (job) => {
+    console.log('✏️ Editing job:', job.productName)
     setJobToEdit(job)
     setEditFormData({
       productName: job.productName,
@@ -203,6 +265,8 @@ export default function AdminProductionPage() {
     e.preventDefault()
     if (!editFormData.productName || !editFormData.quantity) return
     setEditLoading(true)
+
+    console.log('📝 Updating job:', editFormData)
 
     try {
       const response = await fetch(
@@ -222,6 +286,7 @@ export default function AdminProductionPage() {
       )
 
       if (response.ok) {
+        console.log('✅ Job updated successfully')
         Swal.fire(
           'Success!',
           `Job "${editFormData.productName}" updated successfully!`,
@@ -232,10 +297,11 @@ export default function AdminProductionPage() {
         setJobToEdit(null)
       } else {
         const error = await response.json()
+        console.error('❌ Job update failed:', error)
         Swal.fire('Error', `Failed to update job: ${error.message}`, 'error')
       }
     } catch (err) {
-      console.error('Error updating job:', err)
+      console.error('❌ Edit submit error:', err)
       Swal.fire('Error', 'Failed to update job. Please try again.', 'error')
     } finally {
       setEditLoading(false)
@@ -244,6 +310,7 @@ export default function AdminProductionPage() {
 
   // Delete job confirmation
   const handleDeleteConfirm = (job) => {
+    console.log('🗑️ Preparing to delete job:', job.productName)
     setJobToDelete(job)
     setShowDeleteModal(true)
   }
@@ -252,6 +319,8 @@ export default function AdminProductionPage() {
   const handleDelete = async () => {
     if (!jobToDelete) return
     setDeleteLoading(true)
+
+    console.log('🗑️ Deleting job:', jobToDelete.productName)
 
     try {
       const response = await fetch(
@@ -266,6 +335,8 @@ export default function AdminProductionPage() {
       )
 
       if (response.ok) {
+        const result = await response.json()
+        console.log('✅ Job deleted successfully:', result)
         Swal.fire(
           'Deleted!',
           `Job "${jobToDelete.productName}" deleted successfully!`,
@@ -276,10 +347,11 @@ export default function AdminProductionPage() {
         setJobToDelete(null)
       } else {
         const error = await response.json()
+        console.error('❌ Delete failed:', error)
         Swal.fire('Error', `Failed to delete job: ${error.message}`, 'error')
       }
     } catch (err) {
-      console.error('Error deleting job:', err)
+      console.error('❌ Delete job error:', err)
       Swal.fire('Error', 'Failed to delete job. Please try again.', 'error')
     } finally {
       setDeleteLoading(false)
@@ -288,10 +360,12 @@ export default function AdminProductionPage() {
 
   // Enhanced function to view applications with delivery tracking
   const viewApplications = async (jobId, jobName) => {
+    console.log('👥 Fetching applications for job:', jobName)
     try {
       const res = await fetch(`/api/stock/production_apply?jobId=${jobId}`)
       if (res.ok) {
         const applications = await res.json()
+        console.log('👥 Applications received:', applications.length)
         setSelectedJobApplications(applications)
         setSelectedJobId(jobId)
         setSelectedJobName(jobName)
@@ -303,28 +377,45 @@ export default function AdminProductionPage() {
           inputs[app._id] = app.deliveredQuantity || 0
         })
         setDeliveryInputs(inputs)
+      } else {
+        const errorData = await res.json()
+        console.error('❌ Failed to fetch applications:', errorData)
+        Swal.fire('Error', 'Failed to fetch applications', 'error')
       }
     } catch (err) {
-      console.error('Error fetching applications:', err)
+      console.error('❌ Error fetching applications:', err)
+      Swal.fire('Error', 'Failed to fetch applications', 'error')
     }
   }
 
   // Enhanced function to update application status
   const updateApplicationStatus = async (applicationId, status) => {
+    console.log('🔄 Updating application status:', { applicationId, status })
     try {
-      await fetch(`/api/stock/production_apply?id=${applicationId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          role: 'admin',
-        },
-        body: JSON.stringify({ status }),
-      })
-      viewApplications(selectedJobId, selectedJobName)
-      fetchJobs()
-      Swal.fire('Updated!', `Application ${status} successfully`, 'success')
+      const response = await fetch(
+        `/api/stock/production_apply?id=${applicationId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            role: 'admin',
+          },
+          body: JSON.stringify({ status }),
+        }
+      )
+
+      if (response.ok) {
+        console.log('✅ Application status updated')
+        viewApplications(selectedJobId, selectedJobName)
+        fetchJobs()
+        Swal.fire('Updated!', `Application ${status} successfully`, 'success')
+      } else {
+        const errorData = await response.json()
+        console.error('❌ Status update failed:', errorData)
+        Swal.fire('Error', 'Failed to update application status', 'error')
+      }
     } catch (err) {
-      console.error('Error updating application status:', err)
+      console.error('❌ Update application status error:', err)
       Swal.fire('Error', 'Failed to update application status', 'error')
     }
   }
@@ -341,6 +432,11 @@ export default function AdminProductionPage() {
   const confirmDelivery = async (application) => {
     const deliveredQty = deliveryInputs[application._id] || 0
 
+    console.log('📦 Confirming delivery:', {
+      worker: application.workerName,
+      quantity: deliveredQty,
+    })
+
     if (deliveredQty <= 0) {
       Swal.fire('Warning', 'Please enter a valid delivered quantity', 'warning')
       return
@@ -356,28 +452,38 @@ export default function AdminProductionPage() {
     }
 
     try {
-      await fetch(`/api/stock/production_apply?id=${application._id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          role: 'admin',
-        },
-        body: JSON.stringify({
-          deliveredQuantity: deliveredQty,
-          deliveredAt: new Date(),
-          deliveredBy: 'Admin',
-        }),
-      })
-
-      Swal.fire(
-        'Success!',
-        `Delivery of ${deliveredQty} pieces confirmed for ${application.workerName}`,
-        'success'
+      const response = await fetch(
+        `/api/stock/production_apply?id=${application._id}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            role: 'admin',
+          },
+          body: JSON.stringify({
+            deliveredQuantity: deliveredQty,
+            deliveredAt: new Date(),
+            deliveredBy: 'Admin',
+          }),
+        }
       )
-      viewApplications(selectedJobId, selectedJobName)
-      fetchJobs()
+
+      if (response.ok) {
+        console.log('✅ Delivery confirmed successfully')
+        Swal.fire(
+          'Success!',
+          `Delivery of ${deliveredQty} pieces confirmed for ${application.workerName}`,
+          'success'
+        )
+        viewApplications(selectedJobId, selectedJobName)
+        fetchJobs()
+      } else {
+        const errorData = await response.json()
+        console.error('❌ Delivery confirmation failed:', errorData)
+        Swal.fire('Error', 'Failed to confirm delivery', 'error')
+      }
     } catch (err) {
-      console.error('Error confirming delivery:', err)
+      console.error('❌ Confirm delivery error:', err)
       Swal.fire('Error', 'Failed to confirm delivery', 'error')
     }
   }
@@ -418,7 +524,7 @@ export default function AdminProductionPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block font-medium text-amber-900 mb-1 text-sm">
-              Product Name
+              Product Name *
             </label>
             <input
               type="text"
@@ -427,11 +533,12 @@ export default function AdminProductionPage() {
               onChange={handleChange}
               className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
               placeholder="Moneybag, Wallet..."
+              required
             />
           </div>
           <div>
             <label className="block font-medium text-amber-900 mb-1 text-sm">
-              Quantity Needed
+              Quantity Needed *
             </label>
             <input
               type="number"
@@ -440,6 +547,8 @@ export default function AdminProductionPage() {
               onChange={handleChange}
               className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
               placeholder="500"
+              min="1"
+              required
             />
           </div>
         </div>
@@ -728,9 +837,10 @@ export default function AdminProductionPage() {
                           <div className="space-y-2 text-gray-600">
                             <div className="flex items-center gap-2">
                               <span className="font-medium min-w-[100px]">
-                                Email:
+                                Company:
                               </span>
-                              <span>{application.workerEmail}</span>
+                              <span>{application.workerCompany}</span>{' '}
+                              {/* ✅ CHANGED FROM EMAIL TO COMPANY */}
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="font-medium min-w-[100px]">
