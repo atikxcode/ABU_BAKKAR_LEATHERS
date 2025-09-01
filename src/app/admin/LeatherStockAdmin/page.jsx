@@ -6,6 +6,16 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { format } from 'date-fns'
 import Swal from 'sweetalert2'
+import {
+  FaDownload,
+  FaTrash,
+  FaCheck,
+  FaTimes,
+  FaCalendarAlt,
+  FaFilePdf,
+  FaUser,
+  FaBuilding,
+} from 'react-icons/fa'
 import 'react-date-range/dist/styles.css'
 import 'react-date-range/dist/theme/default.css'
 
@@ -16,6 +26,7 @@ export default function AdminLeatherStockPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterCompany, setFilterCompany] = useState('all')
   const [selectedItems, setSelectedItems] = useState([])
   const [selectAll, setSelectAll] = useState(false)
   const [dateRange, setDateRange] = useState([
@@ -40,6 +51,10 @@ export default function AdminLeatherStockPage() {
         params.append('status', filterStatus)
       }
 
+      if (filterCompany !== 'all') {
+        params.append('company', filterCompany)
+      }
+
       const res = await fetch(`/api/stock/leather?${params}`)
       if (res.ok) {
         const data = await res.json()
@@ -58,6 +73,11 @@ export default function AdminLeatherStockPage() {
   useEffect(() => {
     fetchStocks()
   }, [])
+
+  // Get unique companies for filter
+  const uniqueCompanies = [
+    ...new Set(stocks.map((stock) => stock.company)),
+  ].sort()
 
   // Approve or Reject stock
   const updateStatus = async (id, status) => {
@@ -83,6 +103,224 @@ export default function AdminLeatherStockPage() {
     }
   }
 
+  // Generate PDF for individual stock entry
+  const generateIndividualStockPDF = (stock) => {
+    const doc = new jsPDF()
+
+    // Header
+    doc.setFontSize(20)
+    doc.setFont(undefined, 'bold')
+    doc.text('Abu Bakkar Leathers - Individual Stock Entry', 14, 15)
+
+    doc.setFontSize(12)
+    doc.setFont(undefined, 'normal')
+    doc.text(
+      `Generated on: ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`,
+      14,
+      25
+    )
+
+    // Stock Details
+    doc.setFont(undefined, 'bold')
+    doc.text('Stock Entry Details:', 14, 40)
+    doc.setFont(undefined, 'normal')
+
+    const stockDetails = [
+      ['Date', format(new Date(stock.date), 'MMM dd, yyyy')],
+      ['Leather Type', stock.type || 'N/A'],
+      ['Company', stock.company || 'N/A'],
+      ['Quantity', stock.quantity?.toString() || '0'],
+      ['Unit', stock.unit || 'N/A'],
+      ['Status', stock.status || 'pending'],
+      ['Worker Name', stock.workerName || 'N/A'],
+      ['Worker Phone', stock.workerPhone || 'N/A'],
+      [
+        'Created At',
+        stock.createdAt
+          ? format(new Date(stock.createdAt), 'MMM dd, yyyy HH:mm')
+          : 'N/A',
+      ],
+    ]
+
+    autoTable(doc, {
+      head: [['Field', 'Value']],
+      body: stockDetails,
+      startY: 45,
+      styles: {
+        fontSize: 10,
+        cellPadding: 3,
+      },
+      headStyles: {
+        fillColor: [146, 64, 14],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+    })
+
+    doc.save(
+      `stock_${stock.type}_${stock.workerName}_${format(
+        new Date(stock.date),
+        'yyyy-MM-dd'
+      )}.pdf`
+    )
+  }
+
+  // Generate PDF for worker's combined stock
+  const generateWorkerCombinedPDF = (workerName) => {
+    const workerStocks = filteredStocks.filter(
+      (stock) => stock.workerName === workerName
+    )
+
+    if (workerStocks.length === 0) {
+      Swal.fire(
+        'No Data',
+        `No stock entries found for worker: ${workerName}`,
+        'info'
+      )
+      return
+    }
+
+    const doc = new jsPDF()
+
+    // Header
+    doc.setFontSize(20)
+    doc.setFont(undefined, 'bold')
+    doc.text('Abu Bakkar Leathers - Worker Stock Summary', 14, 15)
+
+    doc.setFontSize(12)
+    doc.setFont(undefined, 'normal')
+    doc.text(`Worker: ${workerName}`, 14, 25)
+    doc.text(
+      `Generated on: ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`,
+      14,
+      35
+    )
+    doc.text(`Total Entries: ${workerStocks.length}`, 14, 45)
+
+    // Summary Statistics
+    const approvedCount = workerStocks.filter(
+      (s) => s.status === 'approved'
+    ).length
+    const pendingCount = workerStocks.filter(
+      (s) => s.status === 'pending'
+    ).length
+    const rejectedCount = workerStocks.filter(
+      (s) => s.status === 'rejected'
+    ).length
+    const totalQuantity = workerStocks.reduce(
+      (sum, s) => sum + (s.quantity || 0),
+      0
+    )
+
+    doc.setFont(undefined, 'bold')
+    doc.text('Summary:', 14, 60)
+    doc.setFont(undefined, 'normal')
+    doc.text(
+      `Approved: ${approvedCount} | Pending: ${pendingCount} | Rejected: ${rejectedCount}`,
+      14,
+      70
+    )
+    doc.text(`Total Quantity: ${totalQuantity}`, 14, 80)
+
+    // Company Breakdown
+    const companies = {}
+    workerStocks.forEach((stock) => {
+      if (!companies[stock.company]) {
+        companies[stock.company] = { count: 0, quantity: 0 }
+      }
+      companies[stock.company].count++
+      companies[stock.company].quantity += stock.quantity || 0
+    })
+
+    doc.setFont(undefined, 'bold')
+    doc.text('Company Breakdown:', 14, 95)
+    doc.setFont(undefined, 'normal')
+
+    let yPos = 105
+    Object.entries(companies).forEach(([company, stats]) => {
+      doc.text(
+        `${company}: ${stats.count} entries, ${stats.quantity} total quantity`,
+        20,
+        yPos
+      )
+      yPos += 7
+    })
+
+    // Detailed Table
+    const tableData = workerStocks.map((stock) => [
+      format(new Date(stock.date), 'dd/MM/yyyy'),
+      stock.type || 'N/A',
+      stock.company || 'N/A',
+      (stock.quantity || 0).toString(),
+      stock.unit || 'N/A',
+      stock.status || 'pending',
+    ])
+
+    autoTable(doc, {
+      head: [['Date', 'Type', 'Company', 'Quantity', 'Unit', 'Status']],
+      body: tableData,
+      startY: yPos + 10,
+      styles: {
+        fontSize: 8,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [146, 64, 14],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+    })
+
+    doc.save(
+      `worker_${workerName.replace(/\s+/g, '_')}_combined_stock_${format(
+        new Date(),
+        'yyyy-MM-dd'
+      )}.pdf`
+    )
+  }
+
+  // Download all workers' reports separately
+  const downloadAllWorkerReports = () => {
+    const workers = [
+      ...new Set(filteredStocks.map((stock) => stock.workerName)),
+    ]
+
+    if (workers.length === 0) {
+      Swal.fire('No Data', 'No workers found in current filter', 'info')
+      return
+    }
+
+    Swal.fire({
+      title: 'Generating Reports',
+      text: `Generating ${workers.length} worker reports...`,
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading()
+
+        // Generate reports with delay to prevent browser freeze
+        workers.forEach((worker, index) => {
+          setTimeout(() => {
+            generateWorkerCombinedPDF(worker)
+
+            if (index === workers.length - 1) {
+              Swal.fire(
+                'Success!',
+                `Generated ${workers.length} worker reports`,
+                'success'
+              )
+            }
+          }, index * 500)
+        })
+      },
+    })
+  }
+
   // Single item delete
   const deleteSingleStock = async (stock) => {
     const result = await Swal.fire({
@@ -90,6 +328,7 @@ export default function AdminLeatherStockPage() {
       html: `
         <div class="text-left">
           <p><strong>Type:</strong> ${stock.type}</p>
+          <p><strong>Company:</strong> ${stock.company}</p>
           <p><strong>Quantity:</strong> ${stock.quantity} ${stock.unit}</p>
           <p><strong>Worker:</strong> ${stock.workerName}</p>
           <p><strong>Date:</strong> ${format(
@@ -346,6 +585,7 @@ export default function AdminLeatherStockPage() {
     const detailTableData = filteredStocks.map((stock) => [
       format(new Date(stock.date), 'MMM dd, yyyy'),
       stock.type,
+      stock.company,
       stock.quantity.toString(),
       stock.unit,
       stock.status,
@@ -354,13 +594,24 @@ export default function AdminLeatherStockPage() {
     ])
 
     autoTable(doc, {
-      head: [['Date', 'Type', 'Quantity', 'Unit', 'Status', 'Worker', 'Phone']],
+      head: [
+        [
+          'Date',
+          'Type',
+          'Company',
+          'Quantity',
+          'Unit',
+          'Status',
+          'Worker',
+          'Phone',
+        ],
+      ],
       body: detailTableData,
       startY: currentY + 10,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [146, 64, 14] },
       columnStyles: {
-        6: { cellWidth: 25 }, // Phone column
+        7: { cellWidth: 25 }, // Phone column
       },
     })
 
@@ -449,7 +700,9 @@ export default function AdminLeatherStockPage() {
         doc.text(
           `  • ${entry.workerName} (${entry.workerPhone || 'No phone'}): ${
             entry.quantity
-          } ${entry.unit} (${format(new Date(entry.date), 'MMM dd')})`,
+          } ${entry.unit} (${format(new Date(entry.date), 'MMM dd')}) - ${
+            entry.company
+          }`,
           25,
           yPosition
         )
@@ -465,30 +718,33 @@ export default function AdminLeatherStockPage() {
     doc.save(fileName)
   }
 
-  // Filter stocks based on search term, status, and date range
+  // Filter stocks based on search term, status, company and date range
   const filteredStocks = stocks.filter((stock) => {
     const matchesSearch =
       stock.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       stock.workerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      stock.workerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      stock.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       stock.workerPhone?.toLowerCase().includes(searchTerm.toLowerCase())
 
     const matchesStatus =
       filterStatus === 'all' || stock.status === filterStatus
 
-    return matchesSearch && matchesStatus
+    const matchesCompany =
+      filterCompany === 'all' || stock.company === filterCompany
+
+    return matchesSearch && matchesStatus && matchesCompany
   })
 
   return (
     <div className="min-h-screen p-2 sm:p-4 bg-amber-50">
       <div className="max-w-full mx-auto">
         <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-amber-900 mb-4 sm:mb-6 lg:mb-8 text-center px-2">
-          Leather Stock Management
+          Admin Leather Stock Management
         </h1>
 
         {/* Controls - Fully Responsive */}
         <div className="bg-white rounded-xl shadow-lg p-2 sm:p-4 mb-4 sm:mb-6 border border-amber-200">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-2 sm:gap-4">
             {/* Search */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-1">
               <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1">
@@ -498,7 +754,7 @@ export default function AdminLeatherStockPage() {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Type, worker..."
+                placeholder="Type, worker, company..."
                 className="w-full border border-amber-300 px-2 sm:px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-xs sm:text-sm"
               />
             </div>
@@ -517,6 +773,25 @@ export default function AdminLeatherStockPage() {
                 <option value="pending">Pending</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
+              </select>
+            </div>
+
+            {/* Company Filter */}
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1">
+                Company
+              </label>
+              <select
+                value={filterCompany}
+                onChange={(e) => setFilterCompany(e.target.value)}
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 text-sm"
+              >
+                <option value="all">All Companies</option>
+                {uniqueCompanies.map((company, index) => (
+                  <option key={company + index} value={company}>
+                    {company}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -559,6 +834,21 @@ export default function AdminLeatherStockPage() {
                   <span className="inline">📋 Detailed</span>
                 </button>
               </div>
+            </div>
+
+            {/* Worker Reports */}
+            <div className="col-span-1 sm:col-span-2 lg:col-span-1">
+              <label className="block text-xs sm:text-sm font-medium text-amber-900 mb-1 lg:invisible">
+                &nbsp;
+              </label>
+              <button
+                onClick={downloadAllWorkerReports}
+                className="w-full bg-purple-600 text-white py-2 px-2 sm:px-3 rounded-lg hover:bg-purple-700 transition text-xs sm:text-sm font-medium"
+              >
+                <FaUser className="inline mr-1" />
+                <span className="hidden sm:inline">Worker Reports</span>
+                <span className="sm:hidden">Workers</span>
+              </button>
             </div>
 
             {/* Bulk Delete */}
@@ -704,6 +994,9 @@ export default function AdminLeatherStockPage() {
                       <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[60px]">
                         Type
                       </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[80px]">
+                        Company
+                      </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[60px]">
                         Qty
                       </th>
@@ -716,13 +1009,10 @@ export default function AdminLeatherStockPage() {
                       <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[100px]">
                         Worker Name
                       </th>
-                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[120px] hidden lg:table-cell">
-                        Worker Email
-                      </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[100px]">
                         Phone Number
                       </th>
-                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[120px]">
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[160px]">
                         Actions
                       </th>
                     </tr>
@@ -755,6 +1045,14 @@ export default function AdminLeatherStockPage() {
                             title={stock.type}
                           >
                             {stock.type}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 font-medium">
+                          <div
+                            className="truncate max-w-[80px] sm:max-w-none"
+                            title={stock.company}
+                          >
+                            {stock.company}
                           </div>
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-right">
@@ -790,14 +1088,6 @@ export default function AdminLeatherStockPage() {
                             {stock.workerName}
                           </div>
                         </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 hidden lg:table-cell">
-                          <div
-                            className="truncate max-w-[120px]"
-                            title={stock.workerEmail}
-                          >
-                            {stock.workerEmail}
-                          </div>
-                        </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
                           <div
                             className="truncate max-w-[100px]"
@@ -817,7 +1107,7 @@ export default function AdminLeatherStockPage() {
                                   disabled={loading}
                                   className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs font-medium"
                                 >
-                                  <span className="sm:hidden">✓</span>
+                                  <FaCheck className="inline sm:hidden" />
                                   <span className="hidden sm:inline">
                                     ✓ Approve
                                   </span>
@@ -829,7 +1119,7 @@ export default function AdminLeatherStockPage() {
                                   disabled={loading}
                                   className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 disabled:opacity-50 text-xs font-medium"
                                 >
-                                  <span className="sm:hidden">✗</span>
+                                  <FaTimes className="inline sm:hidden" />
                                   <span className="hidden sm:inline">
                                     ✗ Reject
                                   </span>
@@ -837,21 +1127,29 @@ export default function AdminLeatherStockPage() {
                               </>
                             )}
                             <button
+                              onClick={() => generateIndividualStockPDF(stock)}
+                              className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 text-xs font-medium"
+                              title="Download Individual PDF"
+                            >
+                              <FaFilePdf className="inline sm:hidden" />
+                              <span className="hidden sm:inline">PDF</span>
+                            </button>
+                            <button
+                              onClick={() =>
+                                generateWorkerCombinedPDF(stock.workerName)
+                              }
+                              className="bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 disabled:opacity-50 text-xs font-medium"
+                              title="Download Worker Combined PDF"
+                            >
+                              <FaUser className="inline sm:hidden" />
+                              <span className="hidden sm:inline">Worker</span>
+                            </button>
+                            <button
                               onClick={() => deleteSingleStock(stock)}
                               className="text-red-600 hover:text-red-800 transition-colors p-1"
                               title="Delete Entry"
                             >
-                              <svg
-                                className="w-3 h-3 sm:w-4 sm:h-4"
-                                fill="currentColor"
-                                viewBox="0 0 20 20"
-                              >
-                                <path
-                                  fillRule="evenodd"
-                                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
+                              <FaTrash className="w-3 h-3 sm:w-4 sm:h-4" />
                             </button>
                           </div>
                         </td>

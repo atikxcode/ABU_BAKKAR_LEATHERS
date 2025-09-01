@@ -1,4 +1,3 @@
-// app/api/stock/leather/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
@@ -17,6 +16,7 @@ export async function GET(req) {
     const status = searchParams.get('status')
     const type = searchParams.get('type')
     const workerEmail = searchParams.get('workerEmail')
+    const company = searchParams.get('company')
 
     console.log('🔍 Leather stock request:', {
       startDate,
@@ -24,12 +24,13 @@ export async function GET(req) {
       status,
       type,
       workerEmail,
+      company,
     })
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
-    const usersCollection = db.collection('user') // Add users collection
+    const usersCollection = db.collection('user')
 
     // Build query filter
     let query = {}
@@ -44,6 +45,7 @@ export async function GET(req) {
     if (status && status !== 'all') query.status = status
     if (type) query.type = new RegExp(type, 'i')
     if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
+    if (company) query.company = new RegExp(company, 'i')
 
     const items = await collection.find(query).sort({ date: -1 }).toArray()
 
@@ -51,7 +53,6 @@ export async function GET(req) {
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
         try {
-          // Find user by email to get phone number
           const worker = await usersCollection.findOne({
             email: item.workerEmail,
           })
@@ -118,6 +119,17 @@ export async function POST(req) {
       )
     }
 
+    if (
+      !body.company ||
+      typeof body.company !== 'string' ||
+      body.company.trim() === ''
+    ) {
+      return NextResponse.json(
+        { error: 'Company is required and must be a non-empty string' },
+        { status: 400 }
+      )
+    }
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
@@ -127,11 +139,12 @@ export async function POST(req) {
     const result = await collection.insertOne({
       ...rest,
       type: body.type.trim(),
+      company: body.company.trim(),
       quantity: Number(body.quantity),
       unit: body.unit.trim(),
       workerName: workerName || 'Unknown',
       workerEmail: workerEmail || 'unknown@example.com',
-      date: new Date(),
+      date: new Date(body.date) || new Date(),
       status: body.status || 'pending',
       createdAt: new Date(),
     })
@@ -162,12 +175,10 @@ export async function PATCH(req) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 })
     }
 
-    // Validate ObjectId format
     if (!ObjectId.isValid(id)) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
     }
 
-    // Validate status if being updated
     if (
       body.status &&
       !['pending', 'approved', 'rejected'].includes(body.status)
@@ -178,7 +189,6 @@ export async function PATCH(req) {
       )
     }
 
-    // Validate quantity if being updated
     if (
       body.quantity !== undefined &&
       (isNaN(body.quantity) || Number(body.quantity) <= 0)
@@ -193,7 +203,6 @@ export async function PATCH(req) {
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
-    // Prepare update data
     const updateData = { ...body, updatedAt: new Date() }
     if (body.quantity !== undefined) {
       updateData.quantity = Number(body.quantity)
@@ -235,13 +244,12 @@ export async function DELETE(req) {
     const endDate = searchParams.get('endDate')
     const status = searchParams.get('status')
     const type = searchParams.get('type')
-    const deleteType = searchParams.get('deleteType') // 'single' or 'bulk'
+    const deleteType = searchParams.get('deleteType')
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
-    // Single delete
     if (deleteType === 'single' && id) {
       if (!ObjectId.isValid(id)) {
         return NextResponse.json(
@@ -267,11 +275,9 @@ export async function DELETE(req) {
       })
     }
 
-    // Bulk delete by criteria
     if (deleteType === 'bulk') {
       let query = {}
 
-      // Build query for bulk delete
       if (startDate && endDate) {
         query.date = {
           $gte: new Date(startDate),
@@ -282,7 +288,6 @@ export async function DELETE(req) {
       if (status && status !== 'all') query.status = status
       if (type) query.type = new RegExp(type, 'i')
 
-      // Safety check - don't delete everything without criteria
       if (Object.keys(query).length === 0) {
         return NextResponse.json(
           {
@@ -303,7 +308,6 @@ export async function DELETE(req) {
       })
     }
 
-    // Legacy single delete (backwards compatibility)
     if (id && !deleteType) {
       if (!ObjectId.isValid(id)) {
         return NextResponse.json(

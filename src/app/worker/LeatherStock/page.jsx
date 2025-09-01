@@ -5,22 +5,30 @@ import { useForm } from 'react-hook-form'
 import { format } from 'date-fns'
 import Swal from 'sweetalert2'
 import { AuthContext } from '../../../../Provider/AuthProvider'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { FaDownload, FaFilter, FaFilePdf, FaCalendarAlt } from 'react-icons/fa'
 
 export default function LeatherStockPage() {
   const { user } = useContext(AuthContext)
   const userEmail = user?.email
-  // Try multiple possible name properties
   const userName = user?.name || user?.displayName || user?.fullName || ''
 
   const [stocks, setStocks] = useState([])
   const [myStocks, setMyStocks] = useState([])
   const [othersStocks, setOthersStocks] = useState([])
   const [loading, setLoading] = useState(false)
+  const [downloadLoading, setDownloadLoading] = useState(false)
   const [showMyStocks, setShowMyStocks] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterType, setFilterType] = useState('all')
-  const [currentUser, setCurrentUser] = useState(null) // Add this state
+  const [filterCompany, setFilterCompany] = useState('all')
+  const [currentUser, setCurrentUser] = useState(null)
+  const [dateRange, setDateRange] = useState({
+    startDate: '',
+    endDate: '',
+  })
 
   const {
     register,
@@ -31,6 +39,7 @@ export default function LeatherStockPage() {
     defaultValues: {
       date: format(new Date(), 'yyyy-MM-dd'),
       type: '',
+      company: '',
       quantity: '',
       unit: 'sqft',
     },
@@ -44,7 +53,6 @@ export default function LeatherStockPage() {
       if (res.ok) {
         const { user: userFromDB } = await res.json()
         setCurrentUser(userFromDB)
-        console.log('Current user from DB:', userFromDB) // Debug log
       }
     } catch (err) {
       console.error('Error fetching current user:', err)
@@ -60,7 +68,6 @@ export default function LeatherStockPage() {
         const data = await res.json()
         setStocks(data)
 
-        // Separate my stocks and others stocks
         const my = data.filter((stock) => stock.workerEmail === userEmail)
         const others = data.filter((stock) => stock.workerEmail !== userEmail)
 
@@ -80,21 +87,12 @@ export default function LeatherStockPage() {
   useEffect(() => {
     if (userEmail) {
       fetchStocks()
-      fetchCurrentUser() // Fetch user data from database
+      fetchCurrentUser()
     }
   }, [userEmail])
 
-  // Debug: Log user information
-  useEffect(() => {
-    console.log('Auth user:', user)
-    console.log('User email:', userEmail)
-    console.log('User name:', userName)
-    console.log('Current user from DB:', currentUser)
-  }, [user, userEmail, userName, currentUser])
-
   // Submit stock report
   const onSubmit = async (data) => {
-    // Use database user info if available, fallback to auth context
     const workerName = currentUser?.name || userName || 'Unknown Worker'
     const workerEmail = userEmail
 
@@ -107,12 +105,6 @@ export default function LeatherStockPage() {
       return
     }
 
-    if (!workerName || workerName === 'Unknown Worker') {
-      console.warn('Worker name not found, using email as fallback')
-    }
-
-    console.log('Submitting with:', { workerName, workerEmail }) // Debug log
-
     setLoading(true)
     try {
       const response = await fetch('/api/stock/leather', {
@@ -121,6 +113,7 @@ export default function LeatherStockPage() {
         body: JSON.stringify({
           ...data,
           type: data.type.trim().toLowerCase(),
+          company: data.company.trim(),
           quantity: Number(data.quantity),
           status: 'pending',
           workerName: workerName,
@@ -148,22 +141,288 @@ export default function LeatherStockPage() {
     }
   }
 
-  // Get unique leather types for filter
+  // PDF Generation Function
+  const generatePDF = (
+    data,
+    filename,
+    title = 'Leather Stock Report',
+    includeStats = false
+  ) => {
+    const doc = new jsPDF()
+
+    // Header
+    doc.setFontSize(20)
+    doc.setFont(undefined, 'bold')
+    doc.text('Abu Bakkar Leathers', 14, 15)
+    doc.setFontSize(16)
+    doc.text(title, 14, 25)
+
+    doc.setFontSize(12)
+    doc.setFont(undefined, 'normal')
+    doc.text(`Worker: ${currentUser?.name || userName}`, 14, 35)
+    doc.text(`Email: ${userEmail}`, 14, 45)
+    doc.text(
+      `Generated on: ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`,
+      14,
+      55
+    )
+    doc.text(`Total Reports: ${data.length}`, 14, 65)
+
+    let startY = 75
+
+    // Add statistics if requested
+    if (includeStats && data.length > 0) {
+      const approvedCount = data.filter((s) => s.status === 'approved').length
+      const pendingCount = data.filter((s) => s.status === 'pending').length
+      const rejectedCount = data.filter((s) => s.status === 'rejected').length
+      const totalQuantity = data.reduce((sum, s) => sum + (s.quantity || 0), 0)
+
+      doc.setFont(undefined, 'bold')
+      doc.text('Summary Statistics:', 14, startY)
+      doc.setFont(undefined, 'normal')
+      doc.text(
+        `Approved: ${approvedCount} | Pending: ${pendingCount} | Rejected: ${rejectedCount}`,
+        14,
+        startY + 10
+      )
+      doc.text(`Total Quantity: ${totalQuantity}`, 14, startY + 20)
+
+      // Company breakdown
+      const companies = {}
+      data.forEach((stock) => {
+        if (!companies[stock.company]) {
+          companies[stock.company] = { count: 0, quantity: 0 }
+        }
+        companies[stock.company].count++
+        companies[stock.company].quantity += stock.quantity || 0
+      })
+
+      doc.setFont(undefined, 'bold')
+      doc.text('Company Breakdown:', 14, startY + 35)
+      doc.setFont(undefined, 'normal')
+
+      let yPos = startY + 45
+      Object.entries(companies).forEach(([company, stats]) => {
+        doc.text(
+          `${company}: ${stats.count} reports, ${stats.quantity} total quantity`,
+          20,
+          yPos
+        )
+        yPos += 7
+      })
+
+      startY = yPos + 10
+    }
+
+    // Prepare table data
+    const tableData = data.map((item) => [
+      format(new Date(item.date), 'dd/MM/yyyy'),
+      item.type || 'N/A',
+      item.company || 'N/A',
+      (item.quantity || 0).toString(),
+      item.unit || 'N/A',
+      item.status || 'pending',
+      item.workerPhone || 'N/A',
+    ])
+
+    // Generate table
+    autoTable(doc, {
+      head: [
+        ['Date', 'Type', 'Company', 'Quantity', 'Unit', 'Status', 'Phone'],
+      ],
+      body: tableData,
+      startY: startY,
+      styles: {
+        fontSize: 8,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [146, 64, 14],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+    })
+
+    // Save the PDF
+    doc.save(filename)
+  }
+
+  // Download single stock report as PDF
+  const downloadSingleReportPDF = async (stock) => {
+    setDownloadLoading(true)
+    try {
+      const doc = new jsPDF()
+
+      // Header
+      doc.setFontSize(20)
+      doc.setFont(undefined, 'bold')
+      doc.text('Abu Bakkar Leathers - Individual Stock Report', 14, 15)
+
+      doc.setFontSize(12)
+      doc.setFont(undefined, 'normal')
+      doc.text(`Worker: ${stock.workerName}`, 14, 25)
+      doc.text(`Email: ${stock.workerEmail}`, 14, 35)
+      doc.text(
+        `Generated on: ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`,
+        14,
+        45
+      )
+
+      // Stock Details
+      doc.setFont(undefined, 'bold')
+      doc.text('Stock Details:', 14, 60)
+      doc.setFont(undefined, 'normal')
+
+      const stockDetails = [
+        ['Date', format(new Date(stock.date), 'MMM dd, yyyy')],
+        ['Type', stock.type || 'N/A'],
+        ['Company', stock.company || 'N/A'],
+        ['Quantity', stock.quantity?.toString() || '0'],
+        ['Unit', stock.unit || 'N/A'],
+        ['Status', stock.status || 'pending'],
+        ['Worker Phone', stock.workerPhone || 'N/A'],
+      ]
+
+      autoTable(doc, {
+        head: [['Field', 'Value']],
+        body: stockDetails,
+        startY: 65,
+        styles: {
+          fontSize: 10,
+          cellPadding: 3,
+        },
+        headStyles: {
+          fillColor: [146, 64, 14],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: [245, 245, 245],
+        },
+      })
+
+      doc.save(
+        `leather-stock-${stock.type}-${format(
+          new Date(stock.date),
+          'yyyy-MM-dd'
+        )}.pdf`
+      )
+      Swal.fire(
+        'Success!',
+        'Individual report downloaded successfully',
+        'success'
+      )
+    } catch (err) {
+      console.error('Error downloading single report:', err)
+      Swal.fire('Error', 'Failed to download report', 'error')
+    } finally {
+      setDownloadLoading(false)
+    }
+  }
+
+  // Download all my reports as PDF
+  const downloadAllMyReportsPDF = async () => {
+    setDownloadLoading(true)
+    try {
+      let filteredStocks = myStocks
+
+      // Apply date range filter if specified
+      if (dateRange.startDate && dateRange.endDate) {
+        filteredStocks = filteredStocks.filter((stock) => {
+          const stockDate = new Date(stock.date)
+          return (
+            stockDate >= new Date(dateRange.startDate) &&
+            stockDate <= new Date(dateRange.endDate)
+          )
+        })
+      }
+
+      if (filteredStocks.length === 0) {
+        Swal.fire(
+          'No Data',
+          'No stock reports found for the selected criteria',
+          'info'
+        )
+        return
+      }
+
+      generatePDF(
+        filteredStocks,
+        `my-leather-stock-reports-${format(new Date(), 'yyyy-MM-dd')}.pdf`,
+        'My Complete Leather Stock Reports',
+        true
+      )
+
+      Swal.fire('Success!', 'All reports downloaded successfully', 'success')
+    } catch (err) {
+      console.error('Error downloading all reports:', err)
+      Swal.fire('Error', 'Failed to download reports', 'error')
+    } finally {
+      setDownloadLoading(false)
+    }
+  }
+
+  // Download filtered reports by current filters
+  const downloadFilteredReportsPDF = async () => {
+    setDownloadLoading(true)
+    try {
+      let filteredData = filterStocks(myStocks)
+
+      if (filteredData.length === 0) {
+        Swal.fire(
+          'No Data',
+          'No stock reports found for the current filters',
+          'info'
+        )
+        return
+      }
+
+      generatePDF(
+        filteredData,
+        `filtered-leather-stock-reports-${format(
+          new Date(),
+          'yyyy-MM-dd'
+        )}.pdf`,
+        'Filtered Leather Stock Reports',
+        true
+      )
+
+      Swal.fire(
+        'Success!',
+        'Filtered reports downloaded successfully',
+        'success'
+      )
+    } catch (err) {
+      console.error('Error downloading filtered reports:', err)
+      Swal.fire('Error', 'Failed to download filtered reports', 'error')
+    } finally {
+      setDownloadLoading(false)
+    }
+  }
+
+  // Get unique values for filters
   const leatherTypes = [...new Set(stocks.map((stock) => stock.type))].sort()
+  const companies = [...new Set(stocks.map((stock) => stock.company))].sort()
 
   // Filter stocks function
   const filterStocks = (stockArray) => {
     return stockArray.filter((stock) => {
       const matchesSearch =
         stock.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        stock.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         stock.workerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         stock.workerEmail?.toLowerCase().includes(searchTerm.toLowerCase())
 
       const matchesStatus =
         filterStatus === 'all' || stock.status === filterStatus
       const matchesType = filterType === 'all' || stock.type === filterType
+      const matchesCompany =
+        filterCompany === 'all' || stock.company === filterCompany
 
-      return matchesSearch && matchesStatus && matchesType
+      return matchesSearch && matchesStatus && matchesType && matchesCompany
     })
   }
 
@@ -188,16 +447,6 @@ export default function LeatherStockPage() {
         <h1 className="text-3xl font-bold text-amber-900 mb-8 text-center">
           Leather Stock Reports
         </h1>
-
-        {/* Debug Info - Remove this in production */}
-        {/* <div className="mb-4 p-4 bg-blue-100 rounded-lg text-sm">
-          <p>
-            <strong>Debug Info:</strong>
-          </p>
-          <p>Email: {userEmail || 'Not available'}</p>
-          <p>Auth Name: {userName || 'Not available'}</p>
-          <p>DB Name: {currentUser?.name || 'Not available'}</p>
-        </div> */}
 
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -239,7 +488,7 @@ export default function LeatherStockPage() {
 
           <form
             onSubmit={handleSubmit(onSubmit)}
-            className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+            className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end"
           >
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
@@ -270,6 +519,23 @@ export default function LeatherStockPage() {
               {errors.type && (
                 <p className="text-red-500 text-xs mt-1">
                   {errors.type.message}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-amber-900 mb-1">
+                Company *
+              </label>
+              <input
+                type="text"
+                placeholder="Enter company name"
+                {...register('company', { required: 'Company is required' })}
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none"
+              />
+              {errors.company && (
+                <p className="text-red-500 text-xs mt-1">
+                  {errors.company.message}
                 </p>
               )}
             </div>
@@ -319,10 +585,64 @@ export default function LeatherStockPage() {
           </form>
         </div>
 
-        {/* Rest of your component remains the same... */}
+        {/* Download Reports Section */}
+        <div className="bg-white rounded-xl shadow-lg p-4 mb-6 border border-amber-200">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4">
+            <h3 className="text-lg font-semibold text-amber-900">
+              Download My Reports (PDF)
+            </h3>
+
+            {/* Date Range Filters for Download */}
+            <div className="flex flex-col sm:flex-row gap-2 flex-1">
+              <div className="flex items-center gap-2">
+                <FaCalendarAlt className="text-amber-600" />
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={(e) =>
+                    setDateRange({ ...dateRange, startDate: e.target.value })
+                  }
+                  className="border border-amber-300 px-2 py-1 rounded text-sm"
+                  placeholder="Start Date"
+                />
+                <span className="text-amber-600">to</span>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={(e) =>
+                    setDateRange({ ...dateRange, endDate: e.target.value })
+                  }
+                  className="border border-amber-300 px-2 py-1 rounded text-sm"
+                  placeholder="End Date"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                onClick={downloadAllMyReportsPDF}
+                disabled={downloadLoading}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition disabled:opacity-50 font-medium flex items-center gap-2"
+              >
+                <FaFilePdf />
+                {downloadLoading ? 'Downloading...' : 'Download All'}
+              </button>
+
+              <button
+                onClick={downloadFilteredReportsPDF}
+                disabled={downloadLoading}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition disabled:opacity-50 font-medium flex items-center gap-2"
+              >
+                <FaFilter />
+                {downloadLoading ? 'Downloading...' : 'Download Filtered'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* View Toggle and Filters */}
         <div className="bg-white rounded-xl shadow-lg p-4 mb-6 border border-amber-200">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
             {/* View Toggle */}
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
@@ -361,7 +681,7 @@ export default function LeatherStockPage() {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by type, worker..."
+                placeholder="Search by type, company, worker..."
                 className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
               />
             </div>
@@ -397,6 +717,25 @@ export default function LeatherStockPage() {
                 {leatherTypes.map((type) => (
                   <option key={type} value={type}>
                     {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Company Filter */}
+            <div>
+              <label className="block text-sm font-medium text-amber-900 mb-1">
+                Company
+              </label>
+              <select
+                value={filterCompany}
+                onChange={(e) => setFilterCompany(e.target.value)}
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
+              >
+                <option value="all">All Companies</option>
+                {companies.map((company, index) => (
+                  <option key={company + index} value={company}>
+                    {company}
                   </option>
                 ))}
               </select>
@@ -441,6 +780,9 @@ export default function LeatherStockPage() {
                       Type
                     </th>
                     <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
+                      Company
+                    </th>
+                    <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
                       Quantity
                     </th>
                     <th className="px-4 py-3 border border-gray-300 text-left font-semibold text-amber-900">
@@ -459,6 +801,11 @@ export default function LeatherStockPage() {
                         </th>
                       </>
                     )}
+                    {showMyStocks && (
+                      <th className="px-4 py-3 border border-gray-300 text-center font-semibold text-amber-900">
+                        Actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -472,6 +819,9 @@ export default function LeatherStockPage() {
                       </td>
                       <td className="px-4 py-3 border border-gray-300 font-medium capitalize">
                         {stock.type}
+                      </td>
+                      <td className="px-4 py-3 border border-gray-300 font-medium">
+                        {stock.company || 'N/A'}
                       </td>
                       <td className="px-4 py-3 border border-gray-300 text-right">
                         {stock.quantity}
@@ -502,6 +852,18 @@ export default function LeatherStockPage() {
                             {stock.workerEmail}
                           </td>
                         </>
+                      )}
+                      {showMyStocks && (
+                        <td className="px-4 py-3 border border-gray-300 text-center">
+                          <button
+                            onClick={() => downloadSingleReportPDF(stock)}
+                            disabled={downloadLoading}
+                            className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1 mx-auto"
+                          >
+                            <FaFilePdf className="text-xs" />
+                            {downloadLoading ? 'PDF...' : 'PDF'}
+                          </button>
+                        </td>
                       )}
                     </tr>
                   ))}

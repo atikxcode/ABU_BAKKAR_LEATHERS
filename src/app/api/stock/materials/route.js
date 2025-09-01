@@ -1,4 +1,3 @@
-// app/api/stock/materials/route.js
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
@@ -17,6 +16,7 @@ export async function GET(req) {
     const status = searchParams.get('status')
     const material = searchParams.get('material')
     const workerEmail = searchParams.get('workerEmail')
+    const company = searchParams.get('company') // Added company parameter
 
     console.log('🔍 Material stock request:', {
       startDate,
@@ -24,27 +24,23 @@ export async function GET(req) {
       status,
       material,
       workerEmail,
+      company, // Added to logging
     })
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('materials')
+    const usersCollection = db.collection('user')
 
-    // Build query filter - ONLY apply date filter if dates are provided
+    // Build query filter
     let query = {}
 
-    // Only filter by date if both dates are explicitly provided
     if (startDate && endDate) {
       try {
         query.date = {
           $gte: new Date(startDate),
           $lte: new Date(endDate + 'T23:59:59.999Z'),
         }
-        console.log('📅 Applying date filter:', {
-          from: startDate,
-          to: endDate,
-          query: query.date,
-        })
       } catch (dateError) {
         console.error('❌ Invalid date format:', dateError)
         return NextResponse.json(
@@ -52,84 +48,47 @@ export async function GET(req) {
           { status: 400 }
         )
       }
-    } else {
-      console.log('📅 No date filter applied - showing all records')
     }
 
-    if (status && status !== 'all') {
-      query.status = status
-      console.log('🏷️ Status filter:', status)
-    }
-
-    if (material) {
-      query.material = new RegExp(material, 'i')
-      console.log('🧰 Material filter:', material)
-    }
-
-    if (workerEmail) {
-      query.workerEmail = new RegExp(workerEmail, 'i')
-      console.log('👤 Worker filter:', workerEmail)
-    }
+    if (status && status !== 'all') query.status = status
+    if (material) query.material = new RegExp(material, 'i')
+    if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
+    if (company) query.company = new RegExp(company, 'i') // Added company filter
 
     console.log('🔍 Final query:', JSON.stringify(query, null, 2))
 
-    // Get items with error handling for invalid dates
-    const items = await collection.find(query).toArray()
+    const items = await collection.find(query).sort({ date: -1 }).toArray()
 
-    // Filter out records with invalid dates and sort manually
-    const validItems = items
-      .filter((item) => {
-        if (!item.date) {
-          console.warn('⚠️ Record missing date:', item._id)
-          return false
-        }
-
-        // Check for obviously invalid dates
-        const dateStr = item.date.toString()
-        if (
-          dateStr.includes('+061651') ||
-          dateStr.includes('undefined') ||
-          dateStr.includes('Invalid')
-        ) {
-          console.warn('⚠️ Invalid date found:', item._id, item.date)
-          return false
-        }
-
-        // Try to create a valid date
+    // Enrich with phone numbers from user collection (same as leather)
+    const enrichedItems = await Promise.all(
+      items.map(async (item) => {
         try {
-          const testDate = new Date(item.date)
-          if (isNaN(testDate.getTime())) {
-            console.warn('⚠️ Unparseable date:', item._id, item.date)
-            return false
+          const worker = await usersCollection.findOne({
+            email: item.workerEmail,
+          })
+          return {
+            ...item,
+            workerPhone: worker?.phone || worker?.phoneNumber || 'N/A',
           }
-        } catch (e) {
-          console.warn('⚠️ Date parsing error:', item._id, item.date, e.message)
-          return false
-        }
-
-        return true
-      })
-      .sort((a, b) => {
-        // Sort by date descending, with error handling
-        try {
-          return new Date(b.date) - new Date(a.date)
-        } catch (e) {
-          return 0
+        } catch (err) {
+          console.error(
+            'Error fetching worker info for email:',
+            item.workerEmail,
+            err
+          )
+          return {
+            ...item,
+            workerPhone: 'N/A',
+          }
         }
       })
+    )
 
-    console.log('✅ Total records found:', items.length)
-    console.log('✅ Valid records returned:', validItems.length)
-
-    if (validItems.length !== items.length) {
-      console.warn(
-        `⚠️ Filtered out ${
-          items.length - validItems.length
-        } records with invalid dates`
-      )
-    }
-
-    return NextResponse.json(validItems)
+    console.log(
+      '✅ Returning material stock items with phone numbers:',
+      enrichedItems.length
+    )
+    return NextResponse.json(enrichedItems)
   } catch (err) {
     console.error('❌ GET material stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -148,6 +107,18 @@ export async function POST(req) {
     ) {
       return NextResponse.json(
         { error: 'Material type is required and must be a non-empty string' },
+        { status: 400 }
+      )
+    }
+
+    // Added company validation (same as leather)
+    if (
+      !body.company ||
+      typeof body.company !== 'string' ||
+      body.company.trim() === ''
+    ) {
+      return NextResponse.json(
+        { error: 'Company is required and must be a non-empty string' },
         { status: 400 }
       )
     }
@@ -194,6 +165,7 @@ export async function POST(req) {
     const result = await collection.insertOne({
       ...rest,
       material: body.material.trim().toLowerCase(),
+      company: body.company.trim(), // Added company field (same as leather)
       quantity: Number(body.quantity),
       unit: body.unit.trim(),
       workerName: workerName || 'Unknown',
@@ -229,12 +201,10 @@ export async function PATCH(req) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 })
     }
 
-    // Validate ObjectId format
     if (!ObjectId.isValid(id)) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
     }
 
-    // Validate status if being updated
     if (
       body.status &&
       !['pending', 'approved', 'rejected'].includes(body.status)
@@ -245,7 +215,6 @@ export async function PATCH(req) {
       )
     }
 
-    // Validate quantity if being updated
     if (
       body.quantity !== undefined &&
       (isNaN(body.quantity) || Number(body.quantity) <= 0)
@@ -260,7 +229,6 @@ export async function PATCH(req) {
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('materials')
 
-    // Prepare update data
     const updateData = { ...body, updatedAt: new Date() }
     if (body.quantity !== undefined) {
       updateData.quantity = Number(body.quantity)
@@ -302,13 +270,13 @@ export async function DELETE(req) {
     const endDate = searchParams.get('endDate')
     const status = searchParams.get('status')
     const material = searchParams.get('material')
-    const deleteType = searchParams.get('deleteType') // 'single' or 'bulk'
+    const company = searchParams.get('company') // Added company parameter
+    const deleteType = searchParams.get('deleteType')
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('materials')
 
-    // Single delete
     if (deleteType === 'single' && id) {
       if (!ObjectId.isValid(id)) {
         return NextResponse.json(
@@ -334,11 +302,9 @@ export async function DELETE(req) {
       })
     }
 
-    // Bulk delete by criteria
     if (deleteType === 'bulk') {
       let query = {}
 
-      // Build query for bulk delete
       if (startDate && endDate) {
         try {
           query.date = {
@@ -355,8 +321,8 @@ export async function DELETE(req) {
 
       if (status && status !== 'all') query.status = status
       if (material) query.material = new RegExp(material, 'i')
+      if (company) query.company = new RegExp(company, 'i') // Added company filter
 
-      // Safety check - don't delete everything without criteria
       if (Object.keys(query).length === 0) {
         return NextResponse.json(
           {
@@ -379,7 +345,6 @@ export async function DELETE(req) {
       })
     }
 
-    // Legacy single delete (backwards compatibility)
     if (id && !deleteType) {
       if (!ObjectId.isValid(id)) {
         return NextResponse.json(
