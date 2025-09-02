@@ -93,7 +93,7 @@ export default function AdminReportsPage() {
     setShowDatePicker(false)
   }
 
-  // ✅ FIXED: Enhanced function to enrich data with company information
+  // ✅ FIXED: Updated function to use correct field names
   const enrichDataWithCompanyInfo = async (data, usersData) => {
     return data.map((item) => {
       const worker = usersData.find(
@@ -105,7 +105,9 @@ export default function AdminReportsPage() {
 
       return {
         ...item,
-        workerCompany: item.workerCompany || worker?.company || 'N/A',
+        // ✅ FIXED: Use 'company' field directly from item (as it exists in MongoDB)
+        // Fall back to user company, then 'N/A'
+        workerCompany: item.company || worker?.company || 'N/A',
       }
     })
   }
@@ -218,7 +220,7 @@ export default function AdminReportsPage() {
         format(new Date(item.date), 'dd/MM/yyyy'),
         format(new Date(item.createdAt || item.date), 'HH:mm'),
         item.workerName || 'Unknown',
-        item.workerCompany || 'N/A', // ✅ FIXED: Now properly populated
+        item.workerCompany || 'N/A', // ✅ FIXED: Now properly populated from 'company' field
         item.workerPhone || 'N/A',
         item.type || 'Unknown',
         (item.quantity || 0).toString(),
@@ -426,7 +428,7 @@ export default function AdminReportsPage() {
         format(new Date(item.date), 'dd/MM/yyyy'),
         format(new Date(item.createdAt || item.date), 'HH:mm'),
         item.workerName || 'Unknown',
-        item.workerCompany || 'N/A', // ✅ FIXED: Now properly populated
+        item.workerCompany || 'N/A', // ✅ FIXED: Now properly populated from 'company' field
         item.material || 'Unknown',
         (item.quantity || 0).toString(),
         item.unit || '',
@@ -822,7 +824,7 @@ export default function AdminReportsPage() {
 
         return [
           user.name || 'Unknown',
-          user.company || 'N/A', // ✅ FIXED: Company now properly included
+          user.company || 'N/A', // ✅ FIXED: Company now properly included from user collection
           user.email || 'N/A',
           user.phone || 'N/A',
           user.status || 'pending',
@@ -908,7 +910,7 @@ export default function AdminReportsPage() {
     }
   }
 
-  // Download Comprehensive Report (unchanged as it already works)
+  // Download Comprehensive Report with fixed company field names
   const downloadComprehensiveReport = async () => {
     setLoading(true)
     try {
