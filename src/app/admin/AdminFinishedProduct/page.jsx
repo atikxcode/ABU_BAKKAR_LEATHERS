@@ -120,6 +120,7 @@ export default function AdminFinishedProductsPage() {
     }
   }
 
+  // ✅ UPDATED: Summary Report with Company instead of Status
   const downloadAllProductsReport = () => {
     const doc = new jsPDF()
 
@@ -149,13 +150,13 @@ export default function AdminFinishedProductsPage() {
       45
     )
 
-    // Table data
+    // ✅ UPDATED: Table data with Company instead of Status
     const tableData = filteredProducts.map((product) => [
       product.productName,
       product.originalQuantity?.toString() || '0',
       product.fulfilledQuantity?.toString() || '0',
       format(new Date(product.finishedAt), 'MMM dd, yyyy'),
-      product.status || 'Completed',
+      product.workerCompany || 'N/A', // ✅ CHANGED: Company instead of Status
     ])
 
     autoTable(doc, {
@@ -165,7 +166,7 @@ export default function AdminFinishedProductsPage() {
           'Original Qty',
           'Fulfilled Qty',
           'Finished Date',
-          'Status',
+          'Company', // ✅ CHANGED: Company header instead of Status
         ],
       ],
       body: tableData,
@@ -181,6 +182,7 @@ export default function AdminFinishedProductsPage() {
     doc.save(fileName)
   }
 
+  // ✅ UPDATED: Detailed Report with Company in Worker Contributions
   const downloadDetailedReport = () => {
     const doc = new jsPDF()
 
@@ -237,12 +239,18 @@ export default function AdminFinishedProductsPage() {
       )
       yPosition += 5
 
+      // ✅ ADDED: Show main company if available
+      if (product.workerCompany) {
+        doc.text(`Company: ${product.workerCompany}`, 20, yPosition)
+        yPosition += 5
+      }
+
       if (product.description) {
         doc.text(`Description: ${product.description}`, 20, yPosition)
         yPosition += 5
       }
 
-      // Worker contributions
+      // ✅ UPDATED: Worker contributions with company names
       if (
         product.workerContributions &&
         product.workerContributions.length > 0
@@ -251,17 +259,22 @@ export default function AdminFinishedProductsPage() {
         yPosition += 5
 
         product.workerContributions.forEach((contrib) => {
-          doc.text(
-            `  • ${contrib.workerName}: ${
-              contrib.deliveredQuantity || contrib.quantity
-            } pieces`,
-            25,
-            yPosition
-          )
-          yPosition += 4
+          if (yPosition > 250) {
+            doc.addPage()
+            yPosition = 20
+          }
+
+          // ✅ UPDATED: Include company name in contributions
+          const contributionText = `• ${contrib.workerName} (${
+            contrib.workerCompany || 'N/A'
+          }): ${contrib.deliveredQuantity || contrib.quantity} pieces`
+
+          doc.text(contributionText, 25, yPosition)
+          yPosition += 5
+
           if (contrib.note) {
-            doc.text(`    Note: ${contrib.note}`, 25, yPosition)
-            yPosition += 4
+            doc.text(`  Note: ${contrib.note}`, 28, yPosition)
+            yPosition += 5
           }
         })
       }
@@ -483,6 +496,15 @@ export default function AdminFinishedProductsPage() {
                       {product.fulfilledQuantity}
                     </span>
                   </div>
+                  {/* ✅ ADDED: Show Company in UI */}
+                  {product.workerCompany && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Company:</span>
+                      <span className="font-semibold text-blue-600">
+                        {product.workerCompany}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Finished:</span>
                     <span className="text-amber-900 font-medium">
@@ -491,7 +513,7 @@ export default function AdminFinishedProductsPage() {
                   </div>
                 </div>
 
-                {/* Worker Contributions */}
+                {/* ✅ UPDATED: Worker Contributions with Company */}
                 {product.workerContributions &&
                   product.workerContributions.length > 0 && (
                     <div className="border-t pt-3">
@@ -502,9 +524,15 @@ export default function AdminFinishedProductsPage() {
                         {product.workerContributions.map((contrib, index) => (
                           <div key={index} className="text-xs text-gray-600">
                             <span className="font-medium">
-                              {contrib.workerName}:
+                              {contrib.workerName} (
+                              {contrib.workerCompany || 'N/A'}):
                             </span>{' '}
                             {contrib.deliveredQuantity || contrib.quantity} pcs
+                            {contrib.note && (
+                              <div className="text-xs text-gray-500 italic ml-2">
+                                Note: {contrib.note}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

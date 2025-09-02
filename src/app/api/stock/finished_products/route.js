@@ -154,6 +154,7 @@ export async function POST(req) {
     const db = client.db('AbuBakkarLeathers')
     const finishedCollection = db.collection('finished_products')
     const productionCollection = db.collection('production')
+    const applyCollection = db.collection('production_apply') // ✅ ADDED
 
     // Get the original production job
     const productionJob = await productionCollection.findOne({
@@ -170,7 +171,25 @@ export async function POST(req) {
 
     console.log('📦 Found production job:', productionJob.productName)
 
-    // Create finished product entry
+    // ✅ GET WORKER COMPANIES FROM APPLICATIONS
+    const applications = await applyCollection
+      .find({
+        jobId: body.productionJobId,
+        status: 'approved',
+      })
+      .toArray()
+
+    console.log('📋 Found approved applications:', applications.length)
+
+    // ✅ COLLECT ALL WORKER COMPANIES FROM APPLICATIONS
+    const workerCompanies = applications
+      .map((app) => app.workerCompany)
+      .filter((company) => company && company.trim() !== '')
+      .filter((company, index, arr) => arr.indexOf(company) === index) // Remove duplicates
+
+    console.log('🏢 Worker companies involved:', workerCompanies)
+
+    // Create finished product entry with worker companies
     const finishedProduct = {
       productionJobId: body.productionJobId,
       productName: productionJob.productName,
@@ -183,6 +202,10 @@ export async function POST(req) {
       finishedBy: body.finishedBy || 'Admin',
       notes: body.notes || '',
       status: 'completed',
+      // ✅ ADDED WORKER COMPANIES ARRAY
+      workerCompanies: workerCompanies.length > 0 ? workerCompanies : ['N/A'],
+      // ✅ ADDED FIRST COMPANY FOR BACKWARD COMPATIBILITY
+      workerCompany: workerCompanies.length > 0 ? workerCompanies[0] : 'N/A',
     }
 
     const result = await finishedCollection.insertOne(finishedProduct)

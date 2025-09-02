@@ -96,6 +96,7 @@ export default function WorkerFinishedProductsPage() {
     setShowDatePicker(false)
   }
 
+  // ✅ UPDATED: Summary Report with Company instead of Notes
   const downloadWorkerReport = () => {
     const doc = new jsPDF()
 
@@ -137,13 +138,13 @@ export default function WorkerFinishedProductsPage() {
       80
     )
 
-    // Table data
+    // ✅ UPDATED: Table data with Company instead of Notes
     const tableData = filteredProducts.map((product) => [
       product.productName,
       product.originalQuantity?.toString() || '0',
       product.workerContribution?.toString() || '0',
       format(new Date(product.finishedAt), 'MMM dd, yyyy'),
-      product.workerNotes || '-',
+      product.workerCompany || 'N/A', // ✅ CHANGED: Company instead of Notes
     ])
 
     autoTable(doc, {
@@ -153,7 +154,7 @@ export default function WorkerFinishedProductsPage() {
           'Total Qty',
           'My Contribution',
           'Finished Date',
-          'My Notes',
+          'Company', // ✅ CHANGED: Company header instead of "My Notes"
         ],
       ],
       body: tableData,
@@ -172,6 +173,7 @@ export default function WorkerFinishedProductsPage() {
     doc.save(fileName)
   }
 
+  // ✅ UPDATED: Detailed Report with Company added in contributions
   const downloadDetailedWorkerReport = () => {
     const doc = new jsPDF()
 
@@ -272,6 +274,12 @@ export default function WorkerFinishedProductsPage() {
           : 0
       doc.text(`My Share: ${contributionPercent}%`, 25, yPosition)
       yPosition += 6
+
+      // ✅ ADDED: Company information
+      if (product.workerCompany) {
+        doc.text(`Company: ${product.workerCompany}`, 25, yPosition)
+        yPosition += 6
+      }
 
       if (product.workerNotes) {
         doc.text(`Notes: ${product.workerNotes}`, 25, yPosition)
@@ -508,6 +516,16 @@ export default function WorkerFinishedProductsPage() {
                       {format(new Date(product.finishedAt), 'MMM dd, yyyy')}
                     </span>
                   </div>
+
+                  {/* ✅ ADDED: Show Company in UI */}
+                  {product.workerCompany && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Company:</span>
+                      <span className="text-blue-900 font-medium">
+                        {product.workerCompany}
+                      </span>
+                    </div>
+                  )}
 
                   {product.workerNotes && (
                     <div className="text-sm">

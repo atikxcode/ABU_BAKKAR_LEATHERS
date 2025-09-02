@@ -191,19 +191,45 @@ export default function AdminProductionPage() {
     }
   }
 
-  // Mark as finished function
+  // Mark as finished function - OPTIONAL ENHANCEMENT
   const handleMarkAsFinished = async (job) => {
     console.log('🏁 Marking job as finished:', job.productName)
+
+    // ✅ OPTIONAL: Fetch applications to show company info in confirmation
+    let companyInfo = ''
+    try {
+      const res = await fetch(`/api/stock/production_apply?jobId=${job._id}`)
+      if (res.ok) {
+        const applications = await res.json()
+        const approvedApps = applications.filter(
+          (app) => app.status === 'approved'
+        )
+        const companies = [
+          ...new Set(
+            approvedApps.map((app) => app.workerCompany).filter(Boolean)
+          ),
+        ]
+        if (companies.length > 0) {
+          companyInfo = `<p><strong>Worker Companies:</strong> ${companies.join(
+            ', '
+          )}</p>`
+        }
+      }
+    } catch (err) {
+      console.log('Could not fetch company info:', err)
+    }
+
     const result = await Swal.fire({
       title: 'Mark Job as Finished?',
       html: `
-        <div class="text-left">
-          <p><strong>Job:</strong> ${job.productName}</p>
-          <p><strong>Original Quantity:</strong> ${job.quantity}</p>
-          <p><strong>Fulfilled:</strong> ${job.fulfilledQuantity || 0}</p>
-          <p><strong>Status:</strong> This job will be moved to finished products</p>
-        </div>
-      `,
+      <div class="text-left">
+        <p><strong>Job:</strong> ${job.productName}</p>
+        <p><strong>Original Quantity:</strong> ${job.quantity}</p>
+        <p><strong>Fulfilled:</strong> ${job.fulfilledQuantity || 0}</p>
+        ${companyInfo}
+        <p><strong>Status:</strong> This job will be moved to finished products</p>
+      </div>
+    `,
       icon: 'question',
       showCancelButton: true,
       confirmButtonColor: '#059669',
