@@ -80,10 +80,22 @@ export default function WorkerProductionPage() {
   }
 
   // ----------------- Handle apply -----------------
+  // ----------------- Handle apply -----------------
   const handleApply = async (job) => {
     const input = formInputs[job._id]
-    if (!input || !input.quantity)
-      return Swal.fire('Warning', 'Enter quantity', 'warning')
+
+    // ✅ VALIDATE ALL THREE MANDATORY FIELDS
+    if (!input || !input.quantity) {
+      return Swal.fire('Warning', 'Please enter quantity', 'warning')
+    }
+
+    if (!input.note || input.note.trim() === '') {
+      return Swal.fire('Warning', 'Please enter a note', 'warning')
+    }
+
+    if (!input.company || input.company.trim() === '') {
+      return Swal.fire('Warning', 'Please enter your company name', 'warning')
+    }
 
     if (Number(input.quantity) <= 0) {
       return Swal.fire('Warning', 'Quantity must be greater than 0', 'warning')
@@ -101,17 +113,18 @@ export default function WorkerProductionPage() {
       )
     }
 
-    // Show confirmation dialog
+    // ✅ SHOW CONFIRMATION DIALOG WITH ALL THREE FIELDS
     const result = await Swal.fire({
       title: 'Confirm Application',
       html: `
-        <div class="text-left">
-          <p><strong>Job:</strong> ${job.productName}</p>
-          <p><strong>Quantity:</strong> ${input.quantity} pieces</p>
-          <p><strong>Available:</strong> ${availableQuantity} pieces</p>
-          ${input.note ? `<p><strong>Note:</strong> ${input.note}</p>` : ''}
-        </div>
-      `,
+      <div class="text-left">
+        <p><strong>Job:</strong> ${job.productName}</p>
+        <p><strong>Quantity:</strong> ${input.quantity} pieces</p>
+        <p><strong>Available:</strong> ${availableQuantity} pieces</p>
+        <p><strong>Company:</strong> ${input.company}</p>
+        <p><strong>Note:</strong> ${input.note}</p>
+      </div>
+    `,
       icon: 'question',
       showCancelButton: true,
       confirmButtonColor: '#92400e',
@@ -133,7 +146,8 @@ export default function WorkerProductionPage() {
         body: JSON.stringify({
           jobId: job._id,
           quantity: Number(input.quantity),
-          note: input.note || '',
+          note: input.note.trim(),
+          company: input.company.trim(), // ✅ SEND COMPANY FIELD
         }),
       })
 
@@ -147,7 +161,7 @@ export default function WorkerProductionPage() {
         })
         fetchAppliedJobs()
         fetchJobs() // Refresh jobs to get updated quantities
-        setFormInputs({ ...formInputs, [job._id]: {} })
+        setFormInputs({ ...formInputs, [job._id]: {} }) // Clear form
       } else {
         Swal.fire('Error', data.error || 'Failed to apply', 'error')
       }
@@ -463,6 +477,7 @@ export default function WorkerProductionPage() {
                     !appliedJobs[job._id] &&
                     remainingQuantity > 0 && (
                       <div className="border-t border-amber-200 pt-2 space-y-2">
+                        {/* Quantity Input */}
                         <input
                           type="number"
                           name="quantity"
@@ -472,15 +487,31 @@ export default function WorkerProductionPage() {
                           className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
                           min="1"
                           max={remainingQuantity}
+                          required
                         />
+
+                        {/* ✅ NEW: Company Input */}
+                        <input
+                          type="text"
+                          name="company"
+                          value={formInputs[job._id]?.company || ''}
+                          onChange={(e) => handleChange(job._id, e)}
+                          placeholder="Enter your company name *"
+                          className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
+                          required
+                        />
+
+                        {/* Note Input */}
                         <textarea
                           name="note"
                           value={formInputs[job._id]?.note || ''}
                           onChange={(e) => handleChange(job._id, e)}
                           rows={2}
-                          placeholder="Optional note..."
+                          placeholder="Enter your note *"
                           className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs resize-none"
+                          required
                         />
+
                         <button
                           onClick={() => handleApply(job)}
                           disabled={loading}
@@ -516,6 +547,13 @@ export default function WorkerProductionPage() {
                             <span className="text-gray-600">Quantity:</span>
                             <span className="font-semibold text-amber-900">
                               {appliedJobs[job._id].quantity}
+                            </span>
+                          </div>
+                          {/* ✅ NEW: Show Company */}
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Company:</span>
+                            <span className="font-semibold text-amber-900 truncate">
+                              {appliedJobs[job._id].workerCompany || 'N/A'}
                             </span>
                           </div>
                           {appliedJobs[job._id].note && (

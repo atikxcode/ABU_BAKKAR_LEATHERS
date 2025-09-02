@@ -603,7 +603,7 @@ export default function MaterialStockPage() {
 
             {/* Date Range Filters for Download */}
             <div className="flex flex-col sm:flex-row gap-2 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col md:flex-row items-center gap-2">
                 <FaCalendarAlt className="text-amber-600" />
                 <input
                   type="date"

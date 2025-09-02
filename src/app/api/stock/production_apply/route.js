@@ -89,7 +89,8 @@ export async function GET(req) {
         return {
           ...app,
           workerPhone: worker?.phone || 'N/A',
-          workerCompany: worker?.company || 'N/A', // ✅ ADDED COMPANY FIELD
+          // Use stored company from application first, fallback to user profile
+          workerCompany: app.workerCompany || worker?.company || 'N/A',
           workerEmail: app.workerEmail || worker?.email || 'N/A',
         }
       })
@@ -123,9 +124,37 @@ export async function POST(req) {
     }
 
     const body = await req.json()
-    const { jobId, quantity, note } = body
+    const { jobId, quantity, note, company } = body
 
-    console.log('📝 Application request:', { email, jobId, quantity })
+    console.log('📝 Application request:', {
+      email,
+      jobId,
+      quantity,
+      note,
+      company,
+    })
+
+    // ✅ VALIDATE ALL MANDATORY FIELDS
+    if (!quantity) {
+      console.error('❌ Missing quantity')
+      return NextResponse.json(
+        { error: 'Quantity is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!note || note.trim() === '') {
+      console.error('❌ Missing note')
+      return NextResponse.json({ error: 'Note is required' }, { status: 400 })
+    }
+
+    if (!company || company.trim() === '') {
+      console.error('❌ Missing company')
+      return NextResponse.json(
+        { error: 'Company name is required' },
+        { status: 400 }
+      )
+    }
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
@@ -183,15 +212,15 @@ export async function POST(req) {
       )
     }
 
-    // Store application with company info
+    // ✅ STORE APPLICATION WITH COMPANY FIELD
     const result = await applyCol.insertOne({
       jobId,
       workerId: worker._id.toString(),
       workerName: worker.name,
       workerEmail: email,
-      workerCompany: worker.company || 'N/A', // ✅ ADDED COMPANY STORAGE
+      workerCompany: company.trim(), // ✅ STORE USER-PROVIDED COMPANY
       quantity: Number(quantity),
-      note: note || '',
+      note: note.trim(),
       status: 'pending',
       appliedAt: new Date(),
       deliveredQuantity: 0,
