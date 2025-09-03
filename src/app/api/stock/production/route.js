@@ -33,6 +33,21 @@ const deleteImageFromImgbb = async (imageUrl) => {
   }
 }
 
+// Helper function to validate and format materials
+const validateAndFormatMaterials = (materials) => {
+  if (!materials || !Array.isArray(materials)) {
+    return []
+  }
+
+  return materials
+    .filter((material) => material.name && material.name.trim() !== '')
+    .map((material, index) => ({
+      id: `material_${index + 1}`,
+      name: material.name.trim(),
+      price: parseFloat(material.price) || 0,
+    }))
+}
+
 // ----------------- GET -----------------
 export async function GET(req) {
   console.log('🔍 GET /api/stock/production - Starting')
@@ -108,6 +123,7 @@ export async function POST(req) {
       quantity: body.quantity,
       description: body.description?.substring(0, 50),
       hasImage: !!body.image,
+      materialsCount: body.materials?.length || 0,
     })
 
     // Validate required fields
@@ -179,6 +195,16 @@ export async function POST(req) {
       }
     }
 
+    // Process and validate materials
+    const formattedMaterials = validateAndFormatMaterials(body.materials)
+    console.log('🧰 Processed materials:', formattedMaterials.length)
+
+    // Calculate total material cost
+    const totalMaterialCost = formattedMaterials.reduce(
+      (sum, material) => sum + material.price,
+      0
+    )
+
     // Insert document
     console.log('💾 Inserting document to MongoDB...')
     const result = await collection.insertOne({
@@ -188,6 +214,8 @@ export async function POST(req) {
       remainingQuantity: Number(body.quantity),
       fulfilledQuantity: 0,
       unit: body.unit || 'pcs',
+      materials: formattedMaterials,
+      totalMaterialCost: totalMaterialCost,
       image: imageUrl,
       imageDeleteUrl: deleteUrl,
       date: new Date(),
@@ -241,6 +269,17 @@ export async function PATCH(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production')
+
+    // Process materials if they're being updated
+    if (body.materials) {
+      const formattedMaterials = validateAndFormatMaterials(body.materials)
+      body.materials = formattedMaterials
+      body.totalMaterialCost = formattedMaterials.reduce(
+        (sum, material) => sum + material.price,
+        0
+      )
+      console.log('🧰 Updated materials:', formattedMaterials.length)
+    }
 
     // If quantity is being updated, recalculate remaining quantity
     if (body.quantity !== undefined) {

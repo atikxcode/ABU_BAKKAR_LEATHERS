@@ -19,16 +19,25 @@ export default function AdminProductionPage() {
   const [editLoading, setEditLoading] = useState(false)
   const [imageLoadErrors, setImageLoadErrors] = useState({})
   const [deliveryInputs, setDeliveryInputs] = useState({})
+
+  // Form state with materials
   const [formData, setFormData] = useState({
     product: '',
     description: '',
     quantity: '',
+    materials: [{ name: '', price: '' }], // Start with one material field
   })
+
+  // Edit form state with materials
   const [editFormData, setEditFormData] = useState({
     productName: '',
     description: '',
     quantity: '',
+    materials: [{ name: '', price: '' }],
   })
+
+  // Material count selector state
+  const [materialCount, setMaterialCount] = useState(1)
 
   // Handle image load error
   const handleImageError = (jobId) => {
@@ -63,12 +72,71 @@ export default function AdminProductionPage() {
     fetchJobs()
   }, [])
 
+  // Handle basic form changes
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
   }
 
   const handleEditChange = (e) => {
     setEditFormData({ ...editFormData, [e.target.name]: e.target.value })
+  }
+
+  // Handle material count selection
+  const handleMaterialCountChange = (count) => {
+    setMaterialCount(count)
+    const newMaterials = Array(count)
+      .fill()
+      .map((_, index) => ({
+        name: formData.materials[index]?.name || '',
+        price: formData.materials[index]?.price || '',
+      }))
+    setFormData({ ...formData, materials: newMaterials })
+  }
+
+  // Handle individual material changes
+  const handleMaterialChange = (index, field, value) => {
+    const newMaterials = [...formData.materials]
+    newMaterials[index] = { ...newMaterials[index], [field]: value }
+    setFormData({ ...formData, materials: newMaterials })
+  }
+
+  // Handle edit material changes
+  const handleEditMaterialChange = (index, field, value) => {
+    const newMaterials = [...editFormData.materials]
+    newMaterials[index] = { ...newMaterials[index], [field]: value }
+    setEditFormData({ ...editFormData, materials: newMaterials })
+  }
+
+  // Add new material field
+  const addMaterialField = () => {
+    setFormData({
+      ...formData,
+      materials: [...formData.materials, { name: '', price: '' }],
+    })
+  }
+
+  // Add new material field for edit form
+  const addEditMaterialField = () => {
+    setEditFormData({
+      ...editFormData,
+      materials: [...editFormData.materials, { name: '', price: '' }],
+    })
+  }
+
+  // Remove material field
+  const removeMaterialField = (index) => {
+    if (formData.materials.length > 1) {
+      const newMaterials = formData.materials.filter((_, i) => i !== index)
+      setFormData({ ...formData, materials: newMaterials })
+    }
+  }
+
+  // Remove edit material field
+  const removeEditMaterialField = (index) => {
+    if (editFormData.materials.length > 1) {
+      const newMaterials = editFormData.materials.filter((_, i) => i !== index)
+      setEditFormData({ ...editFormData, materials: newMaterials })
+    }
   }
 
   const handleImageChange = (e) => {
@@ -114,10 +182,16 @@ export default function AdminProductionPage() {
         imageBase64 = await fileToBase64(imageFile)
       }
 
+      // Filter out empty materials
+      const validMaterials = formData.materials.filter(
+        (material) => material.name.trim() !== ''
+      )
+
       const requestBody = {
         productName: formData.product,
         description: formData.description,
         quantity: formData.quantity,
+        materials: validMaterials,
         image: imageBase64,
       }
 
@@ -125,6 +199,7 @@ export default function AdminProductionPage() {
         productName: requestBody.productName,
         quantity: requestBody.quantity,
         description: requestBody.description?.substring(0, 50),
+        materialsCount: requestBody.materials.length,
         hasImage: !!requestBody.image,
       })
 
@@ -144,7 +219,13 @@ export default function AdminProductionPage() {
       if (response.ok) {
         console.log('✅ Job created successfully')
         Swal.fire('Success!', 'Job created successfully', 'success')
-        setFormData({ product: '', description: '', quantity: '' })
+        setFormData({
+          product: '',
+          description: '',
+          quantity: '',
+          materials: [{ name: '', price: '' }],
+        })
+        setMaterialCount(1)
         setImageFile(null)
         // Reset file input
         const fileInput = document.querySelector('input[type="file"]')
@@ -191,11 +272,11 @@ export default function AdminProductionPage() {
     }
   }
 
-  // Mark as finished function - OPTIONAL ENHANCEMENT
+  // Mark as finished function
   const handleMarkAsFinished = async (job) => {
     console.log('🏁 Marking job as finished:', job.productName)
 
-    // ✅ OPTIONAL: Fetch applications to show company info in confirmation
+    // Fetch applications to show company info in confirmation
     let companyInfo = ''
     try {
       const res = await fetch(`/api/stock/production_apply?jobId=${job._id}`)
@@ -283,6 +364,10 @@ export default function AdminProductionPage() {
       productName: job.productName,
       description: job.description,
       quantity: job.quantity.toString(),
+      materials:
+        job.materials && job.materials.length > 0
+          ? job.materials
+          : [{ name: '', price: '' }],
     })
     setShowEditModal(true)
   }
@@ -295,6 +380,11 @@ export default function AdminProductionPage() {
     console.log('📝 Updating job:', editFormData)
 
     try {
+      // Filter out empty materials
+      const validMaterials = editFormData.materials.filter(
+        (material) => material.name.trim() !== ''
+      )
+
       const response = await fetch(
         `/api/stock/production?id=${jobToEdit._id}`,
         {
@@ -307,6 +397,7 @@ export default function AdminProductionPage() {
             productName: editFormData.productName,
             description: editFormData.description,
             quantity: parseInt(editFormData.quantity),
+            materials: validMaterials,
           }),
         }
       )
@@ -542,14 +633,15 @@ export default function AdminProductionPage() {
         Admin Production Jobs
       </h1>
 
-      {/* Compact Form */}
+      {/* Enhanced Form with Materials */}
       <form
         onSubmit={handleSubmit}
-        className="bg-white p-4 rounded-xl shadow-lg max-w-lg mx-auto mb-8 border border-amber-200"
+        className="bg-white p-6 rounded-xl shadow-lg max-w-2xl mx-auto mb-8 border border-amber-200"
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        {/* Basic Product Info */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block font-medium text-amber-900 mb-1 text-sm">
+            <label className="block font-medium text-amber-900 mb-2 text-sm">
               Product Name *
             </label>
             <input
@@ -563,7 +655,7 @@ export default function AdminProductionPage() {
             />
           </div>
           <div>
-            <label className="block font-medium text-amber-900 mb-1 text-sm">
+            <label className="block font-medium text-amber-900 mb-2 text-sm">
               Quantity Needed *
             </label>
             <input
@@ -579,8 +671,8 @@ export default function AdminProductionPage() {
           </div>
         </div>
 
-        <div className="mb-3">
-          <label className="block font-medium text-amber-900 mb-1 text-sm">
+        <div className="mb-4">
+          <label className="block font-medium text-amber-900 mb-2 text-sm">
             Description
           </label>
           <textarea
@@ -593,11 +685,133 @@ export default function AdminProductionPage() {
           />
         </div>
 
+        {/* Materials Section */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <label className="block font-medium text-amber-900 text-sm">
+              Materials Required
+            </label>
+
+            {/* Quick Material Count Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-600">Quick add:</span>
+              {[1, 2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => handleMaterialCountChange(num)}
+                  className={`w-8 h-8 rounded-full text-xs font-medium transition ${
+                    materialCount === num
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-amber-200 text-amber-900 hover:bg-amber-300'
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Materials Input Fields */}
+          <div className="space-y-3">
+            {formData.materials.map((material, index) => (
+              <div
+                key={index}
+                className="flex gap-3 items-center bg-gray-50 p-3 rounded-lg"
+              >
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    placeholder="Material name (e.g., Leather, Thread)"
+                    value={material.name}
+                    onChange={(e) =>
+                      handleMaterialChange(index, 'name', e.target.value)
+                    }
+                    className="w-full border border-gray-300 px-3 py-2 rounded focus:ring-1 focus:ring-amber-400 focus:outline-none text-sm"
+                  />
+                </div>
+                <div className="w-32">
+                  <input
+                    type="number"
+                    placeholder="Price"
+                    value={material.price}
+                    onChange={(e) =>
+                      handleMaterialChange(index, 'price', e.target.value)
+                    }
+                    className="w-full border border-gray-300 px-3 py-2 rounded focus:ring-1 focus:ring-amber-400 focus:outline-none text-sm"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                {/* Remove button (only show if more than 1 material) */}
+                {formData.materials.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeMaterialField(index)}
+                    className="text-red-600 hover:text-red-800 transition-colors p-1"
+                    title="Remove material"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {/* Add Material Button */}
+            <button
+              type="button"
+              onClick={addMaterialField}
+              className="flex items-center justify-center w-full py-2 px-3 border-2 border-dashed border-amber-300 text-amber-600 rounded-lg hover:border-amber-400 hover:text-amber-700 transition text-sm font-medium"
+            >
+              <svg
+                className="w-4 h-4 mr-1"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Add Another Material
+            </button>
+
+            {/* Total Materials Cost Display */}
+            {formData.materials.some((m) => m.price) && (
+              <div className="bg-amber-50 p-2 rounded text-sm">
+                <span className="font-medium text-amber-900">
+                  Total Material Cost: ৳
+                  {formData.materials
+                    .reduce(
+                      (sum, material) =>
+                        sum + (parseFloat(material.price) || 0),
+                      0
+                    )
+                    .toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Image Upload */}
         <div className="mb-4">
-          <label className="block font-medium text-amber-900 mb-1 text-sm">
+          <label className="block font-medium text-amber-900 mb-2 text-sm">
             Product Image
           </label>
-          <label className="cursor-pointer flex justify-center items-center w-full h-10 bg-amber-200 text-amber-900 font-medium rounded-lg hover:bg-amber-300 transition text-sm">
+          <label className="cursor-pointer flex justify-center items-center w-full h-12 bg-amber-200 text-amber-900 font-medium rounded-lg hover:bg-amber-300 transition text-sm">
             {imageFile ? imageFile.name : 'Choose File'}
             <input
               type="file"
@@ -611,7 +825,7 @@ export default function AdminProductionPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-amber-900 text-white font-semibold py-2 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 text-sm"
+          className="w-full bg-amber-900 text-white font-semibold py-3 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 text-sm"
         >
           {loading ? 'Creating...' : 'Create Job'}
         </button>
@@ -702,6 +916,39 @@ export default function AdminProductionPage() {
                 <p className="text-gray-600 text-xs mb-2 line-clamp-2">
                   {job.description || 'No description'}
                 </p>
+
+                {/* Materials Display */}
+                {job.materials && job.materials.length > 0 && (
+                  <div className="bg-blue-50 rounded-lg p-2 mb-2">
+                    <div className="text-xs text-blue-900 font-medium mb-1">
+                      Materials:
+                    </div>
+                    <div className="space-y-1">
+                      {job.materials.slice(0, 2).map((material, index) => (
+                        <div
+                          key={index}
+                          className="flex justify-between text-xs text-blue-800"
+                        >
+                          <span className="truncate">{material.name}</span>
+                          <span>৳{material.price}</span>
+                        </div>
+                      ))}
+                      {job.materials.length > 2 && (
+                        <div className="text-xs text-blue-700">
+                          +{job.materials.length - 2} more...
+                        </div>
+                      )}
+                      {job.totalMaterialCost && (
+                        <div className="border-t border-blue-200 pt-1 mt-1">
+                          <div className="flex justify-between text-xs font-medium text-blue-900">
+                            <span>Total Material Cost Per Unit:</span>
+                            <span>৳{job.totalMaterialCost.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Compact Stats */}
                 <div className="bg-gray-50 rounded-lg p-2 mb-2">
@@ -865,8 +1112,7 @@ export default function AdminProductionPage() {
                               <span className="font-medium min-w-[100px]">
                                 Company:
                               </span>
-                              <span>{application.workerCompany}</span>{' '}
-                              {/* ✅ CHANGED FROM EMAIL TO COMPANY */}
+                              <span>{application.workerCompany}</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="font-medium min-w-[100px]">
@@ -1079,7 +1325,7 @@ export default function AdminProductionPage() {
       {/* Edit Job Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <h2 className="text-2xl font-bold text-amber-900 mb-6">Edit Job</h2>
 
             <form onSubmit={handleEditSubmit}>
@@ -1128,6 +1374,95 @@ export default function AdminProductionPage() {
                     Current fulfilled: {jobToEdit.fulfilledQuantity || 0} pieces
                   </p>
                 )}
+              </div>
+
+              {/* Edit Materials Section */}
+              <div className="mb-6">
+                <label className="block font-medium text-amber-900 mb-3">
+                  Materials Required
+                </label>
+
+                <div className="space-y-3">
+                  {editFormData.materials.map((material, index) => (
+                    <div
+                      key={index}
+                      className="flex gap-3 items-center bg-gray-50 p-3 rounded-lg"
+                    >
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          placeholder="Material name"
+                          value={material.name}
+                          onChange={(e) =>
+                            handleEditMaterialChange(
+                              index,
+                              'name',
+                              e.target.value
+                            )
+                          }
+                          className="w-full border border-gray-300 px-3 py-2 rounded focus:ring-1 focus:ring-amber-400 focus:outline-none text-sm"
+                        />
+                      </div>
+                      <div className="w-32">
+                        <input
+                          type="number"
+                          placeholder="Price"
+                          value={material.price}
+                          onChange={(e) =>
+                            handleEditMaterialChange(
+                              index,
+                              'price',
+                              e.target.value
+                            )
+                          }
+                          className="w-full border border-gray-300 px-3 py-2 rounded focus:ring-1 focus:ring-amber-400 focus:outline-none text-sm"
+                          min="0"
+                          step="0.01"
+                        />
+                      </div>
+
+                      {editFormData.materials.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeEditMaterialField(index)}
+                          className="text-red-600 hover:text-red-800 transition-colors p-1"
+                          title="Remove material"
+                        >
+                          <svg
+                            className="w-5 h-5"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={addEditMaterialField}
+                    className="flex items-center justify-center w-full py-2 px-3 border-2 border-dashed border-amber-300 text-amber-600 rounded-lg hover:border-amber-400 hover:text-amber-700 transition text-sm font-medium"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Add Material
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-3">
