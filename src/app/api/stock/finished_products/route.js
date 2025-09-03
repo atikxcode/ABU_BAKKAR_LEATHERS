@@ -2,7 +2,6 @@ import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// Helper function to check admin role
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
@@ -29,12 +28,10 @@ export async function GET(req) {
     const db = client.db('AbuBakkarLeathers')
     const finishedCollection = db.collection('finished_products')
     const applicationsCollection = db.collection('production_apply')
-    const productionCollection = db.collection('production') // Added for material details
+    const productionCollection = db.collection('production')
 
-    // Build query
     let query = {}
 
-    // Date range filter
     if (startDate && endDate) {
       query.finishedAt = {
         $gte: new Date(startDate),
@@ -46,7 +43,6 @@ export async function GET(req) {
     if (isWorkerRequest && workerEmail) {
       console.log('📋 Getting worker finished products for:', workerEmail)
 
-      // Get worker's approved applications with actual deliveries only
       const workerApplications = await applicationsCollection
         .find({
           workerEmail: workerEmail,
@@ -66,7 +62,6 @@ export async function GET(req) {
           .sort({ finishedAt: -1 })
           .toArray()
 
-        // Enrich with worker's ACTUAL contribution data and material details
         items = await Promise.all(
           items
             .map(async (item) => {
@@ -74,7 +69,6 @@ export async function GET(req) {
                 (app) => app.jobId === item.productionJobId
               )
 
-              // Get original production job for material details
               const originalJob = await productionCollection.findOne({
                 _id: new ObjectId(item.productionJobId),
               })
@@ -85,7 +79,7 @@ export async function GET(req) {
                   ? workerApp.deliveredQuantity || 0
                   : 0,
                 workerNotes: workerApp ? workerApp.note || '' : '',
-                // Add material details from original job
+
                 materials: originalJob?.materials || [],
                 totalMaterialCost: originalJob?.totalMaterialCost || 0,
                 materialCostBreakdown: {
@@ -102,13 +96,11 @@ export async function GET(req) {
         items = []
       }
     } else {
-      // Admin request - get all finished products
       items = await finishedCollection
         .find(query)
         .sort({ finishedAt: -1 })
         .toArray()
 
-      // Enrich with worker contribution data and material details for admin view
       items = await Promise.all(
         items.map(async (item) => {
           const applications = await applicationsCollection
@@ -118,12 +110,10 @@ export async function GET(req) {
             })
             .toArray()
 
-          // Get original production job for material details
           const originalJob = await productionCollection.findOne({
             _id: new ObjectId(item.productionJobId),
           })
 
-          // Calculate total material cost for the entire production
           const totalMaterialCostForProduction =
             (originalJob?.totalMaterialCost || 0) * item.fulfilledQuantity
 
@@ -134,13 +124,12 @@ export async function GET(req) {
             quantity: app.quantity,
             deliveredQuantity: app.deliveredQuantity || 0,
             note: app.note,
-            // Calculate material cost for this worker's contribution
+
             materialCostForWorker:
               (originalJob?.totalMaterialCost || 0) *
               (app.deliveredQuantity || 0),
           }))
 
-          // Add material details from original production job
           item.materials = originalJob?.materials || []
           item.totalMaterialCost = originalJob?.totalMaterialCost || 0
           item.materialCostBreakdown = {
@@ -209,7 +198,6 @@ export async function POST(req) {
     const productionCollection = db.collection('production')
     const applyCollection = db.collection('production_apply')
 
-    // Get the original production job
     const productionJob = await productionCollection.findOne({
       _id: new ObjectId(body.productionJobId),
     })
@@ -224,7 +212,6 @@ export async function POST(req) {
 
     console.log('📦 Found production job:', productionJob.productName)
 
-    // Get worker companies from applications
     const applications = await applyCollection
       .find({
         jobId: body.productionJobId,
@@ -234,15 +221,13 @@ export async function POST(req) {
 
     console.log('📋 Found approved applications:', applications.length)
 
-    // Collect all worker companies from applications
     const workerCompanies = applications
       .map((app) => app.workerCompany)
       .filter((company) => company && company.trim() !== '')
-      .filter((company, index, arr) => arr.indexOf(company) === index) // Remove duplicates
+      .filter((company, index, arr) => arr.indexOf(company) === index)
 
     console.log('🏢 Worker companies involved:', workerCompanies)
 
-    // Calculate total material costs
     const totalMaterialCostForProduction =
       (productionJob.totalMaterialCost || 0) * productionJob.fulfilledQuantity
     const totalMaterialCostDelivered = applications.reduce(
@@ -252,7 +237,6 @@ export async function POST(req) {
       0
     )
 
-    // Create finished product entry with complete material details
     const finishedProduct = {
       productionJobId: body.productionJobId,
       productName: productionJob.productName,
@@ -265,10 +249,10 @@ export async function POST(req) {
       finishedBy: body.finishedBy || 'Admin',
       notes: body.notes || '',
       status: 'completed',
-      // Worker companies
+
       workerCompanies: workerCompanies.length > 0 ? workerCompanies : ['N/A'],
       workerCompany: workerCompanies.length > 0 ? workerCompanies[0] : 'N/A',
-      // Material details from original production job
+
       materials: productionJob.materials || [],
       totalMaterialCost: productionJob.totalMaterialCost || 0,
       materialCostBreakdown: {
@@ -285,7 +269,6 @@ export async function POST(req) {
       result.insertedId
     )
 
-    // Update production job status to finished
     await productionCollection.updateOne(
       { _id: new ObjectId(body.productionJobId) },
       {

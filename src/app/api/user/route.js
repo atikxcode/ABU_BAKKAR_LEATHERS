@@ -1,7 +1,6 @@
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 
-// GET: return all users OR check by email if provided
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url)
@@ -22,14 +21,12 @@ export async function GET(req) {
   }
 }
 
-// POST: insert user only if not exists
 export async function POST(req) {
   try {
     const body = await req.json()
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
 
-    // check if user already exists
     const existingUser = await db
       .collection('user')
       .findOne({ email: body.email })
@@ -40,7 +37,6 @@ export async function POST(req) {
       )
     }
 
-    // enforce pending if not provided
     body.status = body.status || 'pending'
 
     const result = await db.collection('user').insertOne(body)
@@ -53,7 +49,6 @@ export async function POST(req) {
   }
 }
 
-// PATCH: approve user (admin only)
 export async function PATCH(req) {
   try {
     const body = await req.json()

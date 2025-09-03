@@ -5,13 +5,11 @@ import { ObjectId } from 'mongodb'
 const isAdmin = (req) => req.headers.get('role') === 'admin'
 const isWorker = (req) => req.headers.get('role') === 'worker'
 
-// Helper function to update production job quantities
 const updateJobQuantities = async (db, jobId) => {
   try {
     const applyCollection = db.collection('production_apply')
     const productionCollection = db.collection('production')
 
-    // Use aggregation for better performance
     const pipeline = [
       {
         $match: {
@@ -61,13 +59,13 @@ const updateJobQuantities = async (db, jobId) => {
 }
 
 export async function GET(req) {
-  console.log('🔍 GET /api/stock/production_apply - Starting')
+  console.log(' GET /api/stock/production_apply - Starting')
 
   try {
     const { searchParams } = new URL(req.url)
     const jobId = searchParams.get('jobId')
 
-    console.log('📝 GET request params:', { jobId })
+    console.log(' GET request params:', { jobId })
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
@@ -78,9 +76,8 @@ export async function GET(req) {
     if (jobId) query.jobId = jobId
 
     const applications = await applyCollection.find(query).toArray()
-    console.log(`📦 Found ${applications.length} applications`)
+    console.log(` Found ${applications.length} applications`)
 
-    // Enrich applications with worker details including company
     const enrichedApplications = await Promise.all(
       applications.map(async (app) => {
         const worker = await usersCollection.findOne({
@@ -89,34 +86,34 @@ export async function GET(req) {
         return {
           ...app,
           workerPhone: worker?.phone || 'N/A',
-          // Use stored company from application first, fallback to user profile
+
           workerCompany: app.workerCompany || worker?.company || 'N/A',
           workerEmail: app.workerEmail || worker?.email || 'N/A',
         }
       })
     )
 
-    console.log('✅ GET /api/stock/production_apply - Success')
+    console.log(' GET /api/stock/production_apply - Success')
     return NextResponse.json(enrichedApplications)
   } catch (err) {
-    console.error('❌ GET /api/stock/production_apply error:', err)
+    console.error(' GET /api/stock/production_apply error:', err)
     console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function POST(req) {
-  console.log('🚀 POST /api/stock/production_apply - Starting')
+  console.log(' POST /api/stock/production_apply - Starting')
 
   try {
     if (!isWorker(req)) {
-      console.error('❌ Unauthorized access attempt')
+      console.error(' Unauthorized access attempt')
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const email = req.headers.get('email')
     if (!email) {
-      console.error('❌ Missing worker email')
+      console.error(' Missing worker email')
       return NextResponse.json(
         { error: 'Worker email not provided' },
         { status: 400 }
@@ -134,9 +131,8 @@ export async function POST(req) {
       company,
     })
 
-    // ✅ VALIDATE ALL MANDATORY FIELDS
     if (!quantity) {
-      console.error('❌ Missing quantity')
+      console.error(' Missing quantity')
       return NextResponse.json(
         { error: 'Quantity is required' },
         { status: 400 }
@@ -144,12 +140,12 @@ export async function POST(req) {
     }
 
     if (!note || note.trim() === '') {
-      console.error('❌ Missing note')
+      console.error(' Missing note')
       return NextResponse.json({ error: 'Note is required' }, { status: 400 })
     }
 
     if (!company || company.trim() === '') {
-      console.error('❌ Missing company')
+      console.error(' Missing company')
       return NextResponse.json(
         { error: 'Company name is required' },
         { status: 400 }
@@ -164,18 +160,18 @@ export async function POST(req) {
 
     const worker = await usersCol.findOne({ email })
     if (!worker) {
-      console.error('❌ Worker not found:', email)
+      console.error(' Worker not found:', email)
       return NextResponse.json({ error: 'Worker not found' }, { status: 404 })
     }
 
     const job = await jobsCol.findOne({ _id: new ObjectId(jobId) })
     if (!job) {
-      console.error('❌ Job not found:', jobId)
+      console.error(' Job not found:', jobId)
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
 
     if (job.status !== 'open') {
-      console.error('❌ Job not open for applications:', job.status)
+      console.error(' Job not open for applications:', job.status)
       return NextResponse.json(
         { error: 'Job not open for applications' },
         { status: 400 }
@@ -185,7 +181,7 @@ export async function POST(req) {
     const availableQuantity =
       job.remainingQuantity !== undefined ? job.remainingQuantity : job.quantity
     if (Number(quantity) > availableQuantity) {
-      console.error('❌ Quantity exceeds available:', {
+      console.error(' Quantity exceeds available:', {
         requested: quantity,
         available: availableQuantity,
       })
@@ -202,7 +198,7 @@ export async function POST(req) {
       workerId: worker._id.toString(),
     })
     if (existing) {
-      console.error('❌ Worker already applied:', {
+      console.error(' Worker already applied:', {
         worker: worker.name,
         jobId,
       })
@@ -212,13 +208,12 @@ export async function POST(req) {
       )
     }
 
-    // ✅ STORE APPLICATION WITH COMPANY FIELD
     const result = await applyCol.insertOne({
       jobId,
       workerId: worker._id.toString(),
       workerName: worker.name,
       workerEmail: email,
-      workerCompany: company.trim(), // ✅ STORE USER-PROVIDED COMPANY
+      workerCompany: company.trim(),
       quantity: Number(quantity),
       note: note.trim(),
       status: 'pending',
@@ -228,22 +223,22 @@ export async function POST(req) {
       deliveredBy: null,
     })
 
-    console.log('✅ Application created:', result.insertedId)
-    console.log('✅ POST /api/stock/production_apply - Success')
+    console.log(' Application created:', result.insertedId)
+    console.log(' POST /api/stock/production_apply - Success')
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
-    console.error('❌ POST /api/stock/production_apply error:', err)
+    console.error(' POST /api/stock/production_apply error:', err)
     console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function PATCH(req) {
-  console.log('🔄 PATCH /api/stock/production_apply - Starting')
+  console.log(' PATCH /api/stock/production_apply - Starting')
 
   try {
     if (!isAdmin(req)) {
-      console.error('❌ Unauthorized access attempt')
+      console.error(' Unauthorized access attempt')
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -251,10 +246,10 @@ export async function PATCH(req) {
     const id = searchParams.get('id')
     const body = await req.json()
 
-    console.log('📝 PATCH request:', { id, body })
+    console.log(' PATCH request:', { id, body })
 
     if (!id) {
-      console.error('❌ Missing application ID')
+      console.error(' Missing application ID')
       return NextResponse.json(
         { error: 'Application ID is required' },
         { status: 400 }
@@ -262,7 +257,7 @@ export async function PATCH(req) {
     }
 
     if (!ObjectId.isValid(id)) {
-      console.error('❌ Invalid ObjectId:', id)
+      console.error(' Invalid ObjectId:', id)
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
     }
 
@@ -272,20 +267,19 @@ export async function PATCH(req) {
 
     const currentApp = await collection.findOne({ _id: new ObjectId(id) })
     if (!currentApp) {
-      console.error('❌ Application not found:', id)
+      console.error(' Application not found:', id)
       return NextResponse.json(
         { error: 'Application not found' },
         { status: 404 }
       )
     }
 
-    // Handle delivery confirmation
     if (body.deliveredQuantity !== undefined) {
       body.deliveredAt = new Date()
       body.deliveredBy = 'Admin'
 
       if (body.deliveredQuantity > currentApp.quantity) {
-        console.error('❌ Delivered quantity exceeds approved:', {
+        console.error(' Delivered quantity exceeds approved:', {
           delivered: body.deliveredQuantity,
           approved: currentApp.quantity,
         })
@@ -296,39 +290,37 @@ export async function PATCH(req) {
           { status: 400 }
         )
       }
-      console.log('📦 Delivery confirmed:', body.deliveredQuantity)
+      console.log(' Delivery confirmed:', body.deliveredQuantity)
     }
 
-    // Update the application
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
       { $set: { ...body, updatedAt: new Date() } }
     )
 
-    // Update job quantities if delivery was confirmed or status changed
     if (
       body.deliveredQuantity !== undefined ||
       (body.status && body.status !== currentApp.status)
     ) {
-      console.log('🔄 Updating job quantities...')
+      console.log(' Updating job quantities...')
       await updateJobQuantities(db, currentApp.jobId)
     }
 
-    console.log('✅ PATCH /api/stock/production_apply - Success')
+    console.log(' PATCH /api/stock/production_apply - Success')
     return NextResponse.json(result)
   } catch (err) {
-    console.error('❌ PATCH /api/stock/production_apply error:', err)
+    console.error(' PATCH /api/stock/production_apply error:', err)
     console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function DELETE(req) {
-  console.log('🗑️ DELETE /api/stock/production_apply - Starting')
+  console.log(' DELETE /api/stock/production_apply - Starting')
 
   try {
     if (!isAdmin(req)) {
-      console.error('❌ Unauthorized access attempt')
+      console.error(' Unauthorized access attempt')
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -336,7 +328,7 @@ export async function DELETE(req) {
     const id = searchParams.get('id')
 
     if (!id) {
-      console.error('❌ Missing application ID')
+      console.error(' Missing application ID')
       return NextResponse.json(
         { error: 'Application ID is required' },
         { status: 400 }
@@ -344,7 +336,7 @@ export async function DELETE(req) {
     }
 
     if (!ObjectId.isValid(id)) {
-      console.error('❌ Invalid ObjectId:', id)
+      console.error(' Invalid ObjectId:', id)
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
     }
 
@@ -354,7 +346,7 @@ export async function DELETE(req) {
 
     const application = await collection.findOne({ _id: new ObjectId(id) })
     if (!application) {
-      console.error('❌ Application not found:', id)
+      console.error(' Application not found:', id)
       return NextResponse.json(
         { error: 'Application not found' },
         { status: 404 }
@@ -364,14 +356,14 @@ export async function DELETE(req) {
     const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
     if (application) {
-      console.log('🔄 Updating job quantities after deletion...')
+      console.log(' Updating job quantities after deletion...')
       await updateJobQuantities(db, application.jobId)
     }
 
-    console.log('✅ DELETE /api/stock/production_apply - Success')
+    console.log(' DELETE /api/stock/production_apply - Success')
     return NextResponse.json({ message: 'Deleted successfully', result })
   } catch (err) {
-    console.error('❌ DELETE /api/stock/production_apply error:', err)
+    console.error(' DELETE /api/stock/production_apply error:', err)
     console.error('Error stack:', err.stack)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

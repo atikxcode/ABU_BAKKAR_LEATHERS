@@ -2,7 +2,6 @@ import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// Helper function to check admin role
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
@@ -16,7 +15,7 @@ export async function GET(req) {
     const status = searchParams.get('status')
     const material = searchParams.get('material')
     const workerEmail = searchParams.get('workerEmail')
-    const company = searchParams.get('company') // Added company parameter
+    const company = searchParams.get('company')
 
     console.log('🔍 Material stock request:', {
       startDate,
@@ -24,7 +23,7 @@ export async function GET(req) {
       status,
       material,
       workerEmail,
-      company, // Added to logging
+      company,
     })
 
     const client = await clientPromise
@@ -32,7 +31,6 @@ export async function GET(req) {
     const collection = db.collection('materials')
     const usersCollection = db.collection('user')
 
-    // Build query filter
     let query = {}
 
     if (startDate && endDate) {
@@ -53,13 +51,12 @@ export async function GET(req) {
     if (status && status !== 'all') query.status = status
     if (material) query.material = new RegExp(material, 'i')
     if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
-    if (company) query.company = new RegExp(company, 'i') // Added company filter
+    if (company) query.company = new RegExp(company, 'i')
 
     console.log('🔍 Final query:', JSON.stringify(query, null, 2))
 
     const items = await collection.find(query).sort({ date: -1 }).toArray()
 
-    // Enrich with phone numbers from user collection (same as leather)
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
         try {
@@ -99,7 +96,6 @@ export async function POST(req) {
   try {
     const body = await req.json()
 
-    // Enhanced input validation
     if (
       !body.material ||
       typeof body.material !== 'string' ||
@@ -111,7 +107,6 @@ export async function POST(req) {
       )
     }
 
-    // Added company validation (same as leather)
     if (
       !body.company ||
       typeof body.company !== 'string' ||
@@ -147,7 +142,6 @@ export async function POST(req) {
 
     const { workerName, workerEmail, ...rest } = body
 
-    // Ensure proper date handling
     let dateValue
     if (body.date) {
       try {
@@ -165,7 +159,7 @@ export async function POST(req) {
     const result = await collection.insertOne({
       ...rest,
       material: body.material.trim().toLowerCase(),
-      company: body.company.trim(), // Added company field (same as leather)
+      company: body.company.trim(),
       quantity: Number(body.quantity),
       unit: body.unit.trim(),
       workerName: workerName || 'Unknown',
@@ -270,7 +264,7 @@ export async function DELETE(req) {
     const endDate = searchParams.get('endDate')
     const status = searchParams.get('status')
     const material = searchParams.get('material')
-    const company = searchParams.get('company') // Added company parameter
+    const company = searchParams.get('company')
     const deleteType = searchParams.get('deleteType')
 
     const client = await clientPromise
@@ -321,7 +315,7 @@ export async function DELETE(req) {
 
       if (status && status !== 'all') query.status = status
       if (material) query.material = new RegExp(material, 'i')
-      if (company) query.company = new RegExp(company, 'i') // Added company filter
+      if (company) query.company = new RegExp(company, 'i')
 
       if (Object.keys(query).length === 0) {
         return NextResponse.json(

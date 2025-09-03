@@ -2,7 +2,6 @@ import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 
-// Helper function to check admin role
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
@@ -18,7 +17,7 @@ export async function GET(req) {
     const workerEmail = searchParams.get('workerEmail')
     const company = searchParams.get('company')
 
-    console.log('🔍 Leather stock request:', {
+    console.log(' Leather stock request:', {
       startDate,
       endDate,
       status,
@@ -32,7 +31,6 @@ export async function GET(req) {
     const collection = db.collection('leather')
     const usersCollection = db.collection('user')
 
-    // Build query filter
     let query = {}
 
     if (startDate && endDate) {
@@ -49,7 +47,6 @@ export async function GET(req) {
 
     const items = await collection.find(query).sort({ date: -1 }).toArray()
 
-    // Enrich with phone numbers from user collection
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
         try {
@@ -75,12 +72,12 @@ export async function GET(req) {
     )
 
     console.log(
-      '✅ Returning leather stock items with phone numbers:',
+      ' Returning leather stock items with phone numbers:',
       enrichedItems.length
     )
     return NextResponse.json(enrichedItems)
   } catch (err) {
-    console.error('❌ GET leather stock error:', err)
+    console.error(' GET leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -89,7 +86,6 @@ export async function POST(req) {
   try {
     const body = await req.json()
 
-    // Enhanced input validation
     if (
       !body.type ||
       typeof body.type !== 'string' ||
@@ -149,10 +145,10 @@ export async function POST(req) {
       createdAt: new Date(),
     })
 
-    console.log('✅ Created leather stock entry:', result.insertedId)
+    console.log(' Created leather stock entry:', result.insertedId)
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
-    console.error('❌ POST leather stock error:', err)
+    console.error(' POST leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -160,7 +156,7 @@ export async function POST(req) {
 export async function PATCH(req) {
   try {
     if (!isAdmin(req)) {
-      console.warn('⚠️ Unauthorized PATCH attempt on leather stock')
+      console.warn(' Unauthorized PATCH attempt on leather stock')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -220,10 +216,10 @@ export async function PATCH(req) {
       )
     }
 
-    console.log('✅ Updated leather stock entry:', id)
+    console.log(' Updated leather stock entry:', id)
     return NextResponse.json(result)
   } catch (err) {
-    console.error('❌ PATCH leather stock error:', err)
+    console.error(' PATCH leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -231,7 +227,7 @@ export async function PATCH(req) {
 export async function DELETE(req) {
   try {
     if (!isAdmin(req)) {
-      console.warn('⚠️ Unauthorized DELETE attempt on leather stock')
+      console.warn(' Unauthorized DELETE attempt on leather stock')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -261,14 +257,14 @@ export async function DELETE(req) {
       const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
       if (result.deletedCount === 0) {
-        console.log(`❌ DELETE failed: Stock entry ${id} not found`)
+        console.log(` DELETE failed: Stock entry ${id} not found`)
         return NextResponse.json(
           { error: 'Stock entry not found' },
           { status: 404 }
         )
       }
 
-      console.log(`✅ Single stock entry ${id} deleted successfully`)
+      console.log(` Single stock entry ${id} deleted successfully`)
       return NextResponse.json({
         message: 'Stock entry deleted successfully',
         deletedCount: result.deletedCount,
@@ -300,7 +296,7 @@ export async function DELETE(req) {
       const result = await collection.deleteMany(query)
 
       console.log(
-        `✅ Bulk delete completed: ${result.deletedCount} entries deleted`
+        ` Bulk delete completed: ${result.deletedCount} entries deleted`
       )
       return NextResponse.json({
         message: `${result.deletedCount} stock entries deleted successfully`,
@@ -335,7 +331,7 @@ export async function DELETE(req) {
       { status: 400 }
     )
   } catch (err) {
-    console.error('❌ DELETE leather stock error:', err)
+    console.error(' DELETE leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
