@@ -20,12 +20,16 @@ export default function AdminProductionPage() {
   const [imageLoadErrors, setImageLoadErrors] = useState({})
   const [deliveryInputs, setDeliveryInputs] = useState({})
 
+  // Materials modal state
+  const [showMaterialsModal, setShowMaterialsModal] = useState(false)
+  const [selectedJobMaterials, setSelectedJobMaterials] = useState(null)
+
   // Form state with materials
   const [formData, setFormData] = useState({
     product: '',
     description: '',
     quantity: '',
-    materials: [{ name: '', price: '' }], // Start with one material field
+    materials: [{ name: '', price: '' }],
   })
 
   // Edit form state with materials
@@ -71,6 +75,12 @@ export default function AdminProductionPage() {
   useEffect(() => {
     fetchJobs()
   }, [])
+
+  // Show detailed materials modal
+  const showDetailedMaterials = (job) => {
+    setSelectedJobMaterials(job)
+    setShowMaterialsModal(true)
+  }
 
   // Handle basic form changes
   const handleChange = (e) => {
@@ -247,7 +257,7 @@ export default function AdminProductionPage() {
     }
   }
 
-  // PATCH status update
+  // PATCH status update function - THIS WAS MISSING!
   const handleStatusChange = async (jobId, newStatus) => {
     console.log('🔄 Updating job status:', { jobId, newStatus })
     try {
@@ -831,7 +841,7 @@ export default function AdminProductionPage() {
         </button>
       </form>
 
-      {/* Compact Job List */}
+      {/* Compact Job List with Enhanced Materials Display */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {jobs.map((job) => {
           const hasValidImage =
@@ -917,36 +927,61 @@ export default function AdminProductionPage() {
                   {job.description || 'No description'}
                 </p>
 
-                {/* Materials Display */}
+                {/* Enhanced Materials Display */}
                 {job.materials && job.materials.length > 0 && (
-                  <div className="bg-blue-50 rounded-lg p-2 mb-2">
-                    <div className="text-xs text-blue-900 font-medium mb-1">
-                      Materials:
+                  <div className="bg-blue-50 rounded-lg p-3 mb-2 border border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs text-blue-900 font-semibold">
+                        Materials (per unit):
+                      </div>
+                      {job.totalMaterialCost && (
+                        <div className="text-xs font-bold text-blue-800">
+                          ৳{job.totalMaterialCost.toFixed(2)}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-1">
-                      {job.materials.slice(0, 2).map((material, index) => (
+                      {job.materials.slice(0, 3).map((material, index) => (
                         <div
                           key={index}
                           className="flex justify-between text-xs text-blue-800"
                         >
-                          <span className="truncate">{material.name}</span>
-                          <span>৳{material.price}</span>
+                          <span className="truncate flex-1 mr-2">
+                            {material.name}
+                          </span>
+                          <span className="font-medium">৳{material.price}</span>
                         </div>
                       ))}
-                      {job.materials.length > 2 && (
-                        <div className="text-xs text-blue-700">
-                          +{job.materials.length - 2} more...
-                        </div>
-                      )}
-                      {job.totalMaterialCost && (
-                        <div className="border-t border-blue-200 pt-1 mt-1">
-                          <div className="flex justify-between text-xs font-medium text-blue-900">
-                            <span>Total Material Cost Per Unit:</span>
-                            <span>৳{job.totalMaterialCost.toFixed(2)}</span>
-                          </div>
-                        </div>
+                      {job.materials.length > 3 && (
+                        <button
+                          onClick={() => showDetailedMaterials(job)}
+                          className="text-xs text-blue-600 hover:text-blue-800 transition mt-1 w-full text-center py-1"
+                        >
+                          View all {job.materials.length} materials →
+                        </button>
                       )}
                     </div>
+
+                    {/* Total Production Cost Estimate */}
+                    {job.totalMaterialCost && fulfilledQuantity > 0 && (
+                      <div className="border-t border-blue-200 pt-2 mt-2">
+                        <div className="text-xs text-blue-700">
+                          <div className="flex justify-between">
+                            <span>Total production cost:</span>
+                            <span className="font-bold">
+                              ৳
+                              {(
+                                job.totalMaterialCost * fulfilledQuantity
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="text-blue-600 mt-1">
+                            ({fulfilledQuantity} units × ৳
+                            {job.totalMaterialCost.toFixed(2)})
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1038,7 +1073,158 @@ export default function AdminProductionPage() {
         })}
       </div>
 
-      {/* Enhanced Applications Modal with Delivery Tracking */}
+      {/* Detailed Materials Modal */}
+      {showMaterialsModal && selectedJobMaterials && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-blue-100 p-6 border-b border-blue-200">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-bold text-blue-900">
+                    Materials for {selectedJobMaterials.productName}
+                  </h2>
+                  <p className="text-blue-700 text-sm">
+                    Complete material breakdown and costing
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowMaterialsModal(false)}
+                  className="text-blue-900 hover:text-blue-700 text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {selectedJobMaterials.materials &&
+              selectedJobMaterials.materials.length > 0 ? (
+                <div className="space-y-4">
+                  {/* Individual Materials */}
+                  <div className="grid gap-3">
+                    {selectedJobMaterials.materials.map((material, index) => (
+                      <div
+                        key={index}
+                        className="flex justify-between items-center p-4 bg-gray-50 rounded-lg border"
+                      >
+                        <div>
+                          <h3 className="font-semibold text-gray-900">
+                            {material.name}
+                          </h3>
+                          <p className="text-sm text-gray-600">
+                            Material #{index + 1}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-bold text-blue-700">
+                            ৳{material.price}
+                          </span>
+                          <p className="text-xs text-gray-500">per unit</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Cost Summary */}
+                  <div className="border-t border-gray-200 pt-4 mt-6">
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <h3 className="font-bold text-blue-900 mb-3">
+                        Cost Summary
+                      </h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-blue-800">Cost per unit:</span>
+                          <span className="font-bold text-blue-900">
+                            ৳
+                            {selectedJobMaterials.totalMaterialCost?.toFixed(
+                              2
+                            ) || '0.00'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-blue-800">Total quantity:</span>
+                          <span className="font-bold text-blue-900">
+                            {selectedJobMaterials.quantity} units
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-blue-800">
+                            Fulfilled quantity:
+                          </span>
+                          <span className="font-bold text-blue-900">
+                            {selectedJobMaterials.fulfilledQuantity || 0} units
+                          </span>
+                        </div>
+                        <div className="border-t border-blue-200 pt-2 mt-2">
+                          <div className="flex justify-between text-lg">
+                            <span className="text-blue-900 font-bold">
+                              Total material cost:
+                            </span>
+                            <span className="font-bold text-blue-800">
+                              ৳
+                              {(
+                                selectedJobMaterials.totalMaterialCost *
+                                (selectedJobMaterials.fulfilledQuantity || 0)
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Production Examples */}
+                  <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                    <h4 className="font-semibold text-green-900 mb-2">
+                      Production Cost Examples
+                    </h4>
+                    <div className="text-sm text-green-800 space-y-1">
+                      <p>
+                        For 100 units: ৳
+                        {(selectedJobMaterials.totalMaterialCost * 100).toFixed(
+                          2
+                        )}
+                      </p>
+                      <p>
+                        For 500 units: ৳
+                        {(selectedJobMaterials.totalMaterialCost * 500).toFixed(
+                          2
+                        )}
+                      </p>
+                      <p>
+                        For 1000 units: ৳
+                        {(
+                          selectedJobMaterials.totalMaterialCost * 1000
+                        ).toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">
+                    No materials specified for this job
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowMaterialsModal(false)}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Applications Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden">

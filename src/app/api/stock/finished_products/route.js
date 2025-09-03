@@ -29,6 +29,7 @@ export async function GET(req) {
     const db = client.db('AbuBakkarLeathers')
     const finishedCollection = db.collection('finished_products')
     const applicationsCollection = db.collection('production_apply')
+    const productionCollection = db.collection('production') // Added for material details
 
     // Build query
     let query = {}
@@ -65,21 +66,38 @@ export async function GET(req) {
           .sort({ finishedAt: -1 })
           .toArray()
 
-        // Enrich with worker's ACTUAL contribution data (deliveredQuantity)
-        items = items
-          .map((item) => {
-            const workerApp = workerApplications.find(
-              (app) => app.jobId === item.productionJobId
-            )
-            return {
-              ...item,
-              workerContribution: workerApp
-                ? workerApp.deliveredQuantity || 0
-                : 0,
-              workerNotes: workerApp ? workerApp.note || '' : '',
-            }
-          })
-          .filter((item) => item.workerContribution > 0)
+        // Enrich with worker's ACTUAL contribution data and material details
+        items = await Promise.all(
+          items
+            .map(async (item) => {
+              const workerApp = workerApplications.find(
+                (app) => app.jobId === item.productionJobId
+              )
+
+              // Get original production job for material details
+              const originalJob = await productionCollection.findOne({
+                _id: new ObjectId(item.productionJobId),
+              })
+
+              return {
+                ...item,
+                workerContribution: workerApp
+                  ? workerApp.deliveredQuantity || 0
+                  : 0,
+                workerNotes: workerApp ? workerApp.note || '' : '',
+                // Add material details from original job
+                materials: originalJob?.materials || [],
+                totalMaterialCost: originalJob?.totalMaterialCost || 0,
+                materialCostBreakdown: {
+                  perUnit: originalJob?.totalMaterialCost || 0,
+                  totalForWorkerContribution:
+                    (originalJob?.totalMaterialCost || 0) *
+                    (workerApp?.deliveredQuantity || 0),
+                },
+              }
+            })
+            .filter((item) => item.workerContribution > 0)
+        )
       } else {
         items = []
       }
@@ -90,27 +108,62 @@ export async function GET(req) {
         .sort({ finishedAt: -1 })
         .toArray()
 
-      // Enrich with worker contribution data for admin view - ADDED COMPANY
-      for (let item of items) {
-        const applications = await applicationsCollection
-          .find({
-            jobId: item.productionJobId,
-            status: 'approved',
-          })
-          .toArray()
+      // Enrich with worker contribution data and material details for admin view
+      items = await Promise.all(
+        items.map(async (item) => {
+          const applications = await applicationsCollection
+            .find({
+              jobId: item.productionJobId,
+              status: 'approved',
+            })
+            .toArray()
 
-        item.workerContributions = applications.map((app) => ({
-          workerName: app.workerName,
-          workerCompany: app.workerCompany || 'N/A', // ✅ ADDED COMPANY FIELD
-          workerEmail: app.workerEmail,
-          quantity: app.quantity,
-          deliveredQuantity: app.deliveredQuantity || 0,
-          note: app.note,
-        }))
-      }
+          // Get original production job for material details
+          const originalJob = await productionCollection.findOne({
+            _id: new ObjectId(item.productionJobId),
+          })
+
+          // Calculate total material cost for the entire production
+          const totalMaterialCostForProduction =
+            (originalJob?.totalMaterialCost || 0) * item.fulfilledQuantity
+
+          item.workerContributions = applications.map((app) => ({
+            workerName: app.workerName,
+            workerCompany: app.workerCompany || 'N/A',
+            workerEmail: app.workerEmail,
+            quantity: app.quantity,
+            deliveredQuantity: app.deliveredQuantity || 0,
+            note: app.note,
+            // Calculate material cost for this worker's contribution
+            materialCostForWorker:
+              (originalJob?.totalMaterialCost || 0) *
+              (app.deliveredQuantity || 0),
+          }))
+
+          // Add material details from original production job
+          item.materials = originalJob?.materials || []
+          item.totalMaterialCost = originalJob?.totalMaterialCost || 0
+          item.materialCostBreakdown = {
+            perUnit: originalJob?.totalMaterialCost || 0,
+            totalForProduction: totalMaterialCostForProduction,
+            totalDelivered: applications.reduce(
+              (sum, app) =>
+                sum +
+                (originalJob?.totalMaterialCost || 0) *
+                  (app.deliveredQuantity || 0),
+              0
+            ),
+          }
+
+          return item
+        })
+      )
     }
 
-    console.log('✅ Returning finished products:', items.length)
+    console.log(
+      '✅ Returning finished products with material details:',
+      items.length
+    )
     return NextResponse.json(items)
   } catch (err) {
     console.error('❌ Error in finished products API:', err)
@@ -154,7 +207,7 @@ export async function POST(req) {
     const db = client.db('AbuBakkarLeathers')
     const finishedCollection = db.collection('finished_products')
     const productionCollection = db.collection('production')
-    const applyCollection = db.collection('production_apply') // ✅ ADDED
+    const applyCollection = db.collection('production_apply')
 
     // Get the original production job
     const productionJob = await productionCollection.findOne({
@@ -171,7 +224,7 @@ export async function POST(req) {
 
     console.log('📦 Found production job:', productionJob.productName)
 
-    // ✅ GET WORKER COMPANIES FROM APPLICATIONS
+    // Get worker companies from applications
     const applications = await applyCollection
       .find({
         jobId: body.productionJobId,
@@ -181,7 +234,7 @@ export async function POST(req) {
 
     console.log('📋 Found approved applications:', applications.length)
 
-    // ✅ COLLECT ALL WORKER COMPANIES FROM APPLICATIONS
+    // Collect all worker companies from applications
     const workerCompanies = applications
       .map((app) => app.workerCompany)
       .filter((company) => company && company.trim() !== '')
@@ -189,7 +242,17 @@ export async function POST(req) {
 
     console.log('🏢 Worker companies involved:', workerCompanies)
 
-    // Create finished product entry with worker companies
+    // Calculate total material costs
+    const totalMaterialCostForProduction =
+      (productionJob.totalMaterialCost || 0) * productionJob.fulfilledQuantity
+    const totalMaterialCostDelivered = applications.reduce(
+      (sum, app) =>
+        sum +
+        (productionJob.totalMaterialCost || 0) * (app.deliveredQuantity || 0),
+      0
+    )
+
+    // Create finished product entry with complete material details
     const finishedProduct = {
       productionJobId: body.productionJobId,
       productName: productionJob.productName,
@@ -202,14 +265,25 @@ export async function POST(req) {
       finishedBy: body.finishedBy || 'Admin',
       notes: body.notes || '',
       status: 'completed',
-      // ✅ ADDED WORKER COMPANIES ARRAY
+      // Worker companies
       workerCompanies: workerCompanies.length > 0 ? workerCompanies : ['N/A'],
-      // ✅ ADDED FIRST COMPANY FOR BACKWARD COMPATIBILITY
       workerCompany: workerCompanies.length > 0 ? workerCompanies[0] : 'N/A',
+      // Material details from original production job
+      materials: productionJob.materials || [],
+      totalMaterialCost: productionJob.totalMaterialCost || 0,
+      materialCostBreakdown: {
+        perUnit: productionJob.totalMaterialCost || 0,
+        totalForProduction: totalMaterialCostForProduction,
+        totalDelivered: totalMaterialCostDelivered,
+        savings: totalMaterialCostForProduction - totalMaterialCostDelivered,
+      },
     }
 
     const result = await finishedCollection.insertOne(finishedProduct)
-    console.log('✅ Finished product created:', result.insertedId)
+    console.log(
+      '✅ Finished product created with material details:',
+      result.insertedId
+    )
 
     // Update production job status to finished
     await productionCollection.updateOne(
