@@ -1,11 +1,21 @@
-// src/components/AdminHeader.jsx
+import { useContext } from 'react'
+import { AuthContext } from '../Provider/AuthProvider'
+
 export default function WorkerHeader() {
+  const { logOut } = useContext(AuthContext)
+  // SignOut
+  const handleSignOut = () => {
+    logOut().then().catch()
+  }
   return (
     <header className="w-full bg-white shadow p-2 sm:p-3 md:p-4">
       <div className="flex justify-end">
-        <button className="px-2 py-1 sm:px-3 sm:py-1 bg-blue-500 text-white rounded text-sm sm:text-base">
-          <span className="hidden sm:inline">Add User</span>
-          <span className="sm:hidden">Add</span>
+        <button
+          onClick={handleSignOut}
+          className="px-3 py-2 bg-amber-800 text-white rounded-2xl shadow-md hover:bg-amber-700 transition"
+        >
+          <span className="hidden sm:inline ">Log Out</span>
+          <span className="sm:hidden">Log Out</span>
         </button>
       </div>
     </header>

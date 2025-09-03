@@ -1,6 +1,6 @@
 'use client'
 
-import { useContext } from 'react'
+import { useContext, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { AuthContext } from '../Provider/AuthProvider'
 import { motion } from 'framer-motion'
@@ -11,14 +11,20 @@ export default function PrivateRoute({ children }) {
   const router = useRouter()
   const pathname = usePathname()
 
+  // Handle redirect for unauthenticated users
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push(`/RegistrationPage?redirect=${encodeURIComponent(pathname)}`)
+    }
+  }, [user, loading, router, pathname])
+
   // Show loading animation while checking auth
   if (loading) {
     return <LoadingAnimation />
   }
 
-  // Redirect if user is not logged in
+  // Return null if user is not logged in (redirect is handled in useEffect)
   if (!user) {
-    router.push(`/RegistrationPage?redirect=${pathname}`)
     return null
   }
 

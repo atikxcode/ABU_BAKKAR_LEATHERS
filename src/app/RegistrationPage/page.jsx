@@ -460,6 +460,12 @@ export default function RegistrationPage() {
                 </>
               )}
             </p>
+            <div
+              onClick={() => router.push('/')}
+              className="px-3 py-2 bg-amber-800 text-white rounded-2xl shadow-md hover:bg-amber-700 transition w-full text-center"
+            >
+              Home Page
+            </div>
           </div>
         </div>
       </div>

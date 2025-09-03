@@ -17,6 +17,13 @@ export default function AdminRoute({ children }) {
   const [error, setError] = useState(null)
   const [showAlert, setShowAlert] = useState(false)
 
+  // Handle redirect for non-logged-in users
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push(`/RegistrationPage?redirect=${pathname}`)
+    }
+  }, [user, loading, pathname, router])
+
   useEffect(() => {
     if (!user) {
       setFetching(false)
@@ -69,9 +76,8 @@ export default function AdminRoute({ children }) {
     )
   }
 
-  // Redirect if not logged in
+  // Return null if not logged in (redirect is handled by useEffect)
   if (!user) {
-    router.push(`/RegistrationPage?redirect=${pathname}`)
     return null
   }
 
@@ -80,5 +86,3 @@ export default function AdminRoute({ children }) {
 
   return children
 }
-
-// Admin Routing checks if outsider rather than admin didn't get access
