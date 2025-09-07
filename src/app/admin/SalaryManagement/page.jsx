@@ -13,6 +13,7 @@ import {
   FaUsers,
   FaHardHat
 } from 'react-icons/fa'
+import SpreadsheetApp from '../../../../components/SpreadsheetApp'
 
 export default function AdminSalaryPage() {
   const [salaries, setSalaries] = useState([])
@@ -325,6 +326,11 @@ export default function AdminSalaryPage() {
             </div>
           </div>
         </div>
+
+        {/* SpreadSheet Data */}
+
+        <SpreadsheetApp />
+
 
         {/* Controls */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6 mb-4 sm:mb-6 lg:mb-8">

@@ -25,6 +25,7 @@ export default function LeatherStockPage() {
   const [filterType, setFilterType] = useState('all')
   const [filterCompany, setFilterCompany] = useState('all')
   const [currentUser, setCurrentUser] = useState(null)
+  const [pdfFile, setPdfFile] = useState(null) // Added PDF file state
   const [dateRange, setDateRange] = useState({
     startDate: '',
     endDate: '',
@@ -44,6 +45,27 @@ export default function LeatherStockPage() {
       unit: 'sqft',
     },
   })
+
+  // Handle PDF file selection
+  const handlePdfChange = (e) => {
+    const file = e.target.files[0]
+    
+    if (file && file.type !== 'application/pdf') {
+      Swal.fire('Error', 'Please select a valid PDF file', 'error')
+      e.target.value = '' // Clear the input
+      return
+    }
+    
+    // Check file size (5MB limit)
+    if (file && file.size > 5 * 1024 * 1024) {
+      Swal.fire('Error', 'PDF file size must be less than 5MB', 'error')
+      e.target.value = '' // Clear the input
+      return
+    }
+    
+    setPdfFile(file)
+    console.log('📄 PDF selected:', file?.name, file?.size)
+  }
 
   // Fetch current user from database
   const fetchCurrentUser = async () => {
@@ -91,7 +113,7 @@ export default function LeatherStockPage() {
     }
   }, [userEmail])
 
-  // Submit stock report
+  // Submit stock report with PDF support
   const onSubmit = async (data) => {
     const workerName = currentUser?.name || userName || 'Unknown Worker'
     const workerEmail = userEmail
@@ -107,29 +129,49 @@ export default function LeatherStockPage() {
 
     setLoading(true)
     try {
+      // Use FormData to handle both regular data and file upload
+      const formData = new FormData()
+      
+      // Append form data
+      formData.append('date', data.date)
+      formData.append('type', data.type.trim().toLowerCase())
+      formData.append('company', data.company.trim())
+      formData.append('quantity', Number(data.quantity))
+      formData.append('unit', data.unit)
+      formData.append('status', 'pending')
+      formData.append('workerName', workerName)
+      formData.append('workerEmail', workerEmail)
+      
+      // Append PDF file if selected
+      if (pdfFile) {
+        formData.append('pdfFile', pdfFile)
+      }
+
       const response = await fetch('/api/stock/leather', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...data,
-          type: data.type.trim().toLowerCase(),
-          company: data.company.trim(),
-          quantity: Number(data.quantity),
-          status: 'pending',
-          workerName: workerName,
-          workerEmail: workerEmail,
-        }),
+        body: formData, // Don't set Content-Type header - let browser handle it
       })
 
       if (response.ok) {
-        Swal.fire('Success!', 'Stock report submitted successfully', 'success')
+        const result = await response.json()
+        Swal.fire(
+          'Success!', 
+          result.message || 'Stock report submitted successfully', 
+          'success'
+        )
         reset()
+        setPdfFile(null) // Clear PDF file state
+        
+        // Clear file input
+        const fileInput = document.querySelector('input[type="file"]')
+        if (fileInput) fileInput.value = ''
+        
         fetchStocks()
       } else {
         const error = await response.json()
         Swal.fire(
           'Error',
-          error.message || 'Failed to submit stock report',
+          error.error || 'Failed to submit stock report',
           'error'
         )
       }
@@ -141,7 +183,7 @@ export default function LeatherStockPage() {
     }
   }
 
-  // PDF Generation Function
+  // PDF Generation Function (unchanged)
   const generatePDF = (
     data,
     filename,
@@ -250,7 +292,7 @@ export default function LeatherStockPage() {
     doc.save(filename)
   }
 
-  // Download single stock report as PDF
+  // Download single stock report as PDF (unchanged)
   const downloadSingleReportPDF = async (stock) => {
     setDownloadLoading(true)
     try {
@@ -323,7 +365,7 @@ export default function LeatherStockPage() {
     }
   }
 
-  // Download all my reports as PDF
+  // Download all my reports as PDF (unchanged)
   const downloadAllMyReportsPDF = async () => {
     setDownloadLoading(true)
     try {
@@ -365,7 +407,7 @@ export default function LeatherStockPage() {
     }
   }
 
-  // Download filtered reports by current filters
+  // Download filtered reports by current filters (unchanged)
   const downloadFilteredReportsPDF = async () => {
     setDownloadLoading(true)
     try {
@@ -403,11 +445,11 @@ export default function LeatherStockPage() {
     }
   }
 
-  // Get unique values for filters
+  // Get unique values for filters (unchanged)
   const leatherTypes = [...new Set(stocks.map((stock) => stock.type))].sort()
   const companies = [...new Set(stocks.map((stock) => stock.company))].sort()
 
-  // Filter stocks function
+  // Filter stocks function (unchanged)
   const filterStocks = (stockArray) => {
     return stockArray.filter((stock) => {
       const matchesSearch =
@@ -432,7 +474,7 @@ export default function LeatherStockPage() {
     ? filteredMyStocks
     : filteredOthersStocks
 
-  // Calculate statistics
+  // Calculate statistics (unchanged)
   const myPendingCount = myStocks.filter((s) => s.status === 'pending').length
   const myApprovedCount = myStocks.filter((s) => s.status === 'approved').length
   const myRejectedCount = myStocks.filter((s) => s.status === 'rejected').length
@@ -480,7 +522,7 @@ export default function LeatherStockPage() {
           </div>
         </div>
 
-        {/* Submit New Stock Form */}
+        {/* Submit New Stock Form with PDF Upload */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-amber-200">
           <h2 className="text-xl font-semibold text-amber-900 mb-4">
             Submit New Stock Report
@@ -488,7 +530,7 @@ export default function LeatherStockPage() {
 
           <form
             onSubmit={handleSubmit(onSubmit)}
-            className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end"
+            className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end"
           >
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
@@ -567,22 +609,45 @@ export default function LeatherStockPage() {
               </label>
               <select
                 {...register('unit', { required: 'Unit is required' })}
-                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none mb-2"
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none"
               >
                 <option value="sqft">Sq. Ft</option>
                 <option value="kg">Kilogram</option>
                 <option value="piece">Piece</option>
                 <option value="meter">Meter</option>
               </select>
-              <button
-                type="submit"
-                disabled={loading || !userEmail}
-                className="w-full bg-amber-900 text-white py-2 px-4 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 font-medium"
-              >
-                {loading ? 'Submitting...' : 'Submit Report'}
-              </button>
+            </div>
+
+            {/* PDF Upload Field */}
+            <div>
+              <label className="block text-sm font-medium text-amber-900 mb-1">
+                Upload PDF
+              </label>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handlePdfChange}
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
+              />
+              {pdfFile && (
+                <p className="text-xs text-green-600 mt-1">
+                  Selected: {pdfFile.name}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">Max size: 5MB</p>
             </div>
           </form>
+
+          {/* Submit Button */}
+          <div className="mt-4">
+            <button
+              onClick={handleSubmit(onSubmit)}
+              disabled={loading || !userEmail}
+              className="w-full bg-amber-900 text-white py-3 px-4 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 font-medium"
+            >
+              {loading ? 'Submitting...' : 'Submit Report'}
+            </button>
+          </div>
         </div>
 
         {/* Download Reports Section */}
@@ -594,7 +659,7 @@ export default function LeatherStockPage() {
 
             {/* Date Range Filters for Download */}
             <div className="flex flex-col sm:flex-row gap-2 flex-1">
-              <div className="flex flex-col md:flex-rowitems-center gap-2">
+              <div className="flex flex-col md:flex-row items-center gap-2">
                 <FaCalendarAlt className="text-amber-600" />
                 <input
                   type="date"
@@ -855,14 +920,29 @@ export default function LeatherStockPage() {
                       )}
                       {showMyStocks && (
                         <td className="px-4 py-3 border border-gray-300 text-center">
-                          <button
-                            onClick={() => downloadSingleReportPDF(stock)}
-                            disabled={downloadLoading}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1 mx-auto"
-                          >
-                            <FaFilePdf className="text-xs" />
-                            {downloadLoading ? 'PDF...' : 'PDF'}
-                          </button>
+                          <div className="flex items-center justify-center gap-2">
+                            {/* Download PDF of attached file */}
+                            {stock.pdfFile?.fileId && (
+                              <button
+                                onClick={() => window.open(`/api/stock/leather?downloadFile=true&fileId=${stock.pdfFile.fileId}`, '_blank')}
+                                className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition flex items-center gap-1"
+                                title="Download attached PDF"
+                              >
+                                <FaDownload className="text-xs" />
+                                PDF
+                              </button>
+                            )}
+                            {/* Generate report PDF */}
+                            <button
+                              onClick={() => downloadSingleReportPDF(stock)}
+                              disabled={downloadLoading}
+                              className="bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1"
+                              title="Generate report PDF"
+                            >
+                              <FaFilePdf className="text-xs" />
+                              {downloadLoading ? 'PDF...' : 'Report'}
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>

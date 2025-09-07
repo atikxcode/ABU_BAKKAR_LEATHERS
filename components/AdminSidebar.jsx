@@ -13,6 +13,7 @@ import {
   FaBars,
   FaTimes,
   FaMoneyBill,
+  FaFileExcel
 } from 'react-icons/fa'
 
 export default function AdminSidebar() {
@@ -69,6 +70,7 @@ export default function AdminSidebar() {
     },
     { href: '/admin/UserManage', icon: FaUsers, label: 'Users' },
     { href: '/admin/AdminReport', icon: FaPen, label: 'Reports' },
+    { href: '/admin/SpreadSheetReport', icon: FaFileExcel, label: 'Excel' },
     { href: '/admin/SalaryManagement', icon: FaMoneyBill, label: 'Salary' },
     { href: '/', icon: FaHome, label: 'Home' },
   ]

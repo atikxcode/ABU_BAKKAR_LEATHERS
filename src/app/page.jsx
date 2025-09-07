@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import React, { useContext, useEffect, useState } from 'react'
 import { AuthContext } from '../../Provider/AuthProvider'
 import LoadingAnimation from '../../components/LoadingAnimation'
+import ReportGenerate from '../../components/ReportGenerate'
 
 export default function Home() {
   const { user, logOut } = useContext(AuthContext)
@@ -45,6 +46,8 @@ export default function Home() {
   const redirectToLoginSignup = () => {
     router.push('/RegistrationPage')
   }
+
+ 
 
   const redirectToWorkerDashboard = () => {
     router.push('/worker')
@@ -189,6 +192,8 @@ export default function Home() {
           </form>
         </div>
       </section>
+
+      
 
       {/* Footer */}
       <footer className="px-8 md:px-16 py-6 text-center border-t text-gray-500">

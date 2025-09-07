@@ -7,6 +7,7 @@ export default function AdminProductionPage() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(false)
   const [imageFile, setImageFile] = useState(null)
+  const [pdfFile, setPdfFile] = useState(null) // Added pdfFile state
   const [showModal, setShowModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -155,15 +156,35 @@ export default function AdminProductionPage() {
     setImageFile(file)
   }
 
+  // Added handler for PDF file
+  const handlePdfChange = (e) => {
+    const file = e.target.files[0]
+    console.log('📄 PDF selected:', file?.name, file?.size)
+    
+    // Validate PDF file
+    if (file && file.type !== 'application/pdf') {
+      Swal.fire('Error', 'Please select a valid PDF file', 'error')
+      return
+    }
+    
+    // Check file size (5MB limit)
+    if (file && file.size > 5 * 1024 * 1024) {
+      Swal.fire('Error', 'PDF file size must be less than 5MB', 'error')
+      return
+    }
+    
+    setPdfFile(file)
+  }
+
   // Convert file to Base64
   const fileToBase64 = (file) =>
     new Promise((resolve, reject) => {
-      console.log('📷 Converting image to base64...')
+      console.log('📄 Converting file to base64...')
       const reader = new FileReader()
       reader.readAsDataURL(file)
       reader.onload = () => {
         const base64 = reader.result.split(',')[1]
-        console.log('📷 Base64 conversion complete, length:', base64.length)
+        console.log('📄 Base64 conversion complete, length:', base64.length)
         resolve(base64)
       }
       reader.onerror = (error) => {
@@ -186,40 +207,40 @@ export default function AdminProductionPage() {
     setLoading(true)
 
     try {
-      let imageBase64 = null
-      if (imageFile) {
-        console.log('📷 Processing image file...')
-        imageBase64 = await fileToBase64(imageFile)
-      }
-
-      // Filter out empty materials
+      // Use FormData for file uploads instead of JSON
+      const formDataToSend = new FormData()
+      
+      formDataToSend.append('productName', formData.product)
+      formDataToSend.append('description', formData.description)
+      formDataToSend.append('quantity', formData.quantity)
+      
+      // Filter out empty materials and stringify for FormData
       const validMaterials = formData.materials.filter(
         (material) => material.name.trim() !== ''
       )
+      formDataToSend.append('materials', JSON.stringify(validMaterials))
 
-      const requestBody = {
-        productName: formData.product,
-        description: formData.description,
-        quantity: formData.quantity,
-        materials: validMaterials,
-        image: imageBase64,
+      // Handle image file (convert to base64 for IMGBB compatibility)
+      if (imageFile) {
+        console.log('📷 Processing image file...')
+        const imageBase64 = await fileToBase64(imageFile)
+        formDataToSend.append('image', imageBase64)
       }
 
-      console.log('📡 Sending request to API:', {
-        productName: requestBody.productName,
-        quantity: requestBody.quantity,
-        description: requestBody.description?.substring(0, 50),
-        materialsCount: requestBody.materials.length,
-        hasImage: !!requestBody.image,
-      })
+      // Handle PDF file (send as file object)
+      if (pdfFile) {
+        console.log('📄 Adding PDF file...')
+        formDataToSend.append('pdfFile', pdfFile)
+      }
+
+      console.log('📡 Sending request to API with FormData')
 
       const response = await fetch('/api/stock/production', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           role: 'admin',
         },
-        body: JSON.stringify(requestBody),
+        body: formDataToSend,
       })
 
       console.log('📡 API response status:', response.status)
@@ -228,7 +249,7 @@ export default function AdminProductionPage() {
 
       if (response.ok) {
         console.log('✅ Job created successfully')
-        Swal.fire('Success!', 'Job created successfully', 'success')
+        Swal.fire('Success!', responseData.message || 'Job created successfully', 'success')
         setFormData({
           product: '',
           description: '',
@@ -237,9 +258,14 @@ export default function AdminProductionPage() {
         })
         setMaterialCount(1)
         setImageFile(null)
-        // Reset file input
-        const fileInput = document.querySelector('input[type="file"]')
-        if (fileInput) fileInput.value = ''
+        setPdfFile(null) // Reset PDF file
+        
+        // Reset file inputs
+        const imageInput = document.querySelector('input[type="file"][accept*="image"]')
+        if (imageInput) imageInput.value = ''
+        const pdfInput = document.querySelector('input[type="file"][accept="application/pdf"]')
+        if (pdfInput) pdfInput.value = ''
+        
         fetchJobs()
       } else {
         console.error('❌ API error:', responseData)
@@ -816,13 +842,39 @@ export default function AdminProductionPage() {
           </div>
         </div>
 
+        {/* PDF Upload */}
+        <div className="mb-4">
+          <label className="block font-medium text-amber-900 mb-2 text-sm">
+            Product PDF
+          </label>
+          <label className="cursor-pointer flex justify-center items-center w-full h-12 bg-blue-200 text-blue-900 font-medium rounded-lg hover:bg-blue-300 transition text-sm">
+            {pdfFile ? (
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm0 2h12v10H4V5z"/>
+                </svg>
+                {pdfFile.name}
+              </span>
+            ) : (
+              'Choose PDF File'
+            )}
+            <input
+              type="file"
+              onChange={handlePdfChange}
+              className="hidden"
+              accept="application/pdf"
+            />
+          </label>
+          <p className="text-xs text-gray-500 mt-1">Max file size: 5MB</p>
+        </div>
+
         {/* Image Upload */}
         <div className="mb-4">
           <label className="block font-medium text-amber-900 mb-2 text-sm">
             Product Image
           </label>
           <label className="cursor-pointer flex justify-center items-center w-full h-12 bg-amber-200 text-amber-900 font-medium rounded-lg hover:bg-amber-300 transition text-sm">
-            {imageFile ? imageFile.name : 'Choose File'}
+            {imageFile ? imageFile.name : 'Choose Image File'}
             <input
               type="file"
               onChange={handleImageChange}
@@ -888,6 +940,22 @@ export default function AdminProductionPage() {
                     {job.productName}
                   </h3>
                   <div className="flex gap-1 ml-2">
+                    {/* PDF Download Button */}
+                    {job.pdfFile?.fileId && (
+                      <button
+                        onClick={() => window.open(`/api/stock/production?downloadFile=true&fileId=${job.pdfFile.fileId}`, '_blank')}
+                        className="text-blue-600 hover:text-blue-800 transition-colors p-1"
+                        title="Download PDF"
+                      >
+                        <svg
+                          className="w-3 h-3"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm0 2h12v10H4V5z"/>
+                        </svg>
+                      </button>
+                    )}
                     {/* Edit Button */}
                     <button
                       onClick={() => handleEditConfirm(job)}
@@ -1705,7 +1773,7 @@ export default function AdminProductionPage() {
                   "{jobToDelete?.productName}"
                 </span>
                 ? This will permanently remove the job, all applications, and
-                the associated image. This action cannot be undone.
+                the associated image and PDF files. This action cannot be undone.
               </p>
               <div className="flex gap-3">
                 <button

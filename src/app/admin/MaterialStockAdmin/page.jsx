@@ -37,6 +37,34 @@ export default function AdminMaterialStockPage() {
     },
   ])
 
+  // Handle PDF download from worker's submission
+  const downloadWorkerPDF = (stock) => {
+    if (!stock.pdfFile?.fileId) {
+      Swal.fire('No PDF', 'No PDF file attached to this stock entry', 'info')
+      return
+    }
+
+    try {
+      console.log('📄 Downloading worker PDF for:', stock.material)
+      
+      // Open PDF in a new tab for download
+      const downloadUrl = `/api/stock/materials?downloadFile=true&fileId=${stock.pdfFile.fileId}`
+      window.open(downloadUrl, '_blank')
+      
+      // Show success message
+      Swal.fire({
+        title: 'PDF Download',
+        text: `Downloading PDF for ${stock.material} from ${stock.workerName}`,
+        icon: 'success',
+        timer: 2000,
+        showConfirmButton: false
+      })
+    } catch (err) {
+      console.error('❌ PDF download error:', err)
+      Swal.fire('Error', 'Failed to download PDF file', 'error')
+    }
+  }
+
   // Fetch all material stock reports
   const fetchStocks = async () => {
     setLoading(true)
@@ -134,6 +162,7 @@ export default function AdminMaterialStockPage() {
       ['Status', stock.status || 'pending'],
       ['Worker Name', stock.workerName || 'N/A'],
       ['Worker Phone', stock.workerPhone || 'N/A'],
+      ['Has PDF Attachment', stock.pdfFile?.fileId ? 'Yes' : 'No'],
       [
         'Created At',
         stock.createdAt
@@ -257,10 +286,11 @@ export default function AdminMaterialStockPage() {
       (stock.quantity || 0).toString(),
       stock.unit || 'N/A',
       stock.status || 'pending',
+      stock.pdfFile?.fileId ? 'Yes' : 'No', // PDF attachment indicator
     ])
 
     autoTable(doc, {
-      head: [['Date', 'Material', 'Company', 'Quantity', 'Unit', 'Status']],
+      head: [['Date', 'Material', 'Company', 'Quantity', 'Unit', 'Status', 'PDF']],
       body: tableData,
       startY: yPos + 10,
       styles: {
@@ -335,7 +365,8 @@ export default function AdminMaterialStockPage() {
             new Date(stock.date),
             'MMM dd, yyyy'
           )}</p>
-          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete this material stock entry!</p>
+          ${stock.pdfFile?.fileId ? '<p><strong>Has PDF:</strong> Yes</p>' : ''}
+          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete this material stock entry and any attached PDF file!</p>
         </div>
       `,
       icon: 'warning',
@@ -445,7 +476,7 @@ export default function AdminMaterialStockPage() {
       html: `
         <div class="text-left">
           <p><strong>Selected Items:</strong> ${selectedItems.length}</p>
-          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete all selected material stock entries!</p>
+          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete all selected material stock entries and their PDF files!</p>
         </div>
       `,
       icon: 'warning',
@@ -555,12 +586,17 @@ export default function AdminMaterialStockPage() {
       14,
       80
     )
+    doc.text(
+      `Entries with PDF: ${filteredStocks.filter(s => s.pdfFile?.fileId).length}`,
+      14,
+      90
+    )
 
     // Combined Stock Table
     if (Object.keys(combinedStock).length > 0) {
       doc.setFontSize(14)
       doc.setFont(undefined, 'bold')
-      doc.text('Approved Stock Summary:', 14, 100)
+      doc.text('Approved Stock Summary:', 14, 110)
 
       const stockTableData = Object.entries(combinedStock).map(
         ([material, quantity]) => [material, quantity.toString()]
@@ -569,13 +605,13 @@ export default function AdminMaterialStockPage() {
       autoTable(doc, {
         head: [['Material Type', 'Total Quantity']],
         body: stockTableData,
-        startY: 110,
+        startY: 120,
         styles: { fontSize: 10 },
         headStyles: { fillColor: [146, 64, 14] },
       })
     }
 
-    // Detailed Stock Entries including phone numbers
+    // Detailed Stock Entries including phone numbers and PDF status
     const currentY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 20 : 130
 
     doc.setFontSize(14)
@@ -591,6 +627,7 @@ export default function AdminMaterialStockPage() {
       stock.status,
       stock.workerName,
       stock.workerPhone || 'N/A',
+      stock.pdfFile?.fileId ? 'Yes' : 'No',
     ])
 
     autoTable(doc, {
@@ -604,6 +641,7 @@ export default function AdminMaterialStockPage() {
           'Status',
           'Worker',
           'Phone',
+          'PDF',
         ],
       ],
       body: detailTableData,
@@ -612,6 +650,7 @@ export default function AdminMaterialStockPage() {
       headStyles: { fillColor: [146, 64, 14] },
       columnStyles: {
         7: { cellWidth: 25 }, // Phone column
+        8: { cellWidth: 15 }, // PDF column
       },
     })
 
@@ -671,6 +710,12 @@ export default function AdminMaterialStockPage() {
       20,
       yPosition
     )
+    yPosition += 8
+    doc.text(
+      `• Entries with PDF: ${filteredStocks.filter(s => s.pdfFile?.fileId).length}`,
+      20,
+      yPosition
+    )
     yPosition += 15
 
     // Stock Details by Material Type
@@ -706,7 +751,7 @@ export default function AdminMaterialStockPage() {
             entry.quantity
           } ${entry.unit} (${format(new Date(entry.date), 'MMM dd')}) - ${
             entry.company
-          }`,
+          } ${entry.pdfFile?.fileId ? '[PDF]' : ''}`,
           25,
           yPosition
         )
@@ -1016,7 +1061,7 @@ export default function AdminMaterialStockPage() {
                       <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[100px]">
                         Phone Number
                       </th>
-                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[160px]">
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300 text-left font-semibold text-amber-900 min-w-[180px]">
                         Actions
                       </th>
                     </tr>
@@ -1102,6 +1147,20 @@ export default function AdminMaterialStockPage() {
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 border border-gray-300">
                           <div className="flex flex-col sm:flex-row gap-1 sm:gap-2">
+                            {/* Download Worker's PDF Button */}
+                            {stock.pdfFile?.fileId && (
+                              <button
+                                onClick={() => downloadWorkerPDF(stock)}
+                                className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 text-xs font-medium"
+                                title="Download Worker's PDF"
+                              >
+                                <FaDownload className="inline sm:hidden" />
+                                <span className="hidden sm:inline">
+                                  📄 PDF
+                                </span>
+                              </button>
+                            )}
+                            
                             {stock.status === 'pending' && (
                               <>
                                 <button
@@ -1136,7 +1195,7 @@ export default function AdminMaterialStockPage() {
                               title="Download Individual PDF"
                             >
                               <FaFilePdf className="inline sm:hidden" />
-                              <span className="hidden sm:inline">PDF</span>
+                              <span className="hidden sm:inline">Report</span>
                             </button>
                             <button
                               onClick={() =>
@@ -1270,7 +1329,7 @@ function BulkDeleteModal({ onClose, onDelete, dateRange }) {
             deleteStatus === 'all' ? 'All statuses' : deleteStatus
           }</p>
           <p><strong>Material:</strong> ${deleteMaterial || 'All materials'}</p>
-          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete all matching entries!</p>
+          <p class="text-red-600 font-semibold mt-3">⚠️ This will permanently delete all matching entries and their PDF files!</p>
         </div>
       `,
       icon: 'warning',

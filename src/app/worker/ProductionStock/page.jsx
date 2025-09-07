@@ -23,6 +23,34 @@ export default function WorkerProductionPage() {
     }))
   }
 
+  // ----------------- Handle PDF download -----------------
+  const handlePdfDownload = async (job) => {
+    if (!job.pdfFile?.fileId) {
+      Swal.fire('Error', 'No PDF file available for this job', 'error')
+      return
+    }
+
+    try {
+      console.log('📄 Downloading PDF for job:', job.productName)
+      
+      // Open PDF in a new tab for download
+      const downloadUrl = `/api/stock/production?downloadFile=true&fileId=${job.pdfFile.fileId}`
+      window.open(downloadUrl, '_blank')
+      
+      // Show success message
+      Swal.fire({
+        title: 'PDF Download',
+        text: `Downloading PDF for ${job.productName}`,
+        icon: 'success',
+        timer: 2000,
+        showConfirmButton: false
+      })
+    } catch (err) {
+      console.error('❌ PDF download error:', err)
+      Swal.fire('Error', 'Failed to download PDF file', 'error')
+    }
+  }
+
   // ----------------- Fetch all production jobs -----------------
   const fetchJobs = async () => {
     try {
@@ -481,10 +509,35 @@ export default function WorkerProductionPage() {
                 )}
 
                 <div className="p-3">
-                  {/* Job Info */}
-                  <h3 className="font-bold text-amber-900 text-sm mb-1 truncate">
-                    {job.productName}
-                  </h3>
+                  {/* Job Info Header with PDF Download Button */}
+                  <div className="flex justify-between items-start mb-1">
+                    <h3 className="font-bold text-amber-900 text-sm truncate flex-1">
+                      {job.productName}
+                    </h3>
+                    {/* PDF Download Button */}
+                    {job.pdfFile?.fileId && (
+                      <button
+                        onClick={() => handlePdfDownload(job)}
+                        className="text-blue-600 hover:text-blue-800 transition-colors p-1 ml-2"
+                        title="Download PDF"
+                      >
+                        <div className='flex gap-2 items-center'>
+                          <p className='text-[12px]'>PDF DOWNLOAD</p>
+                          <svg
+                          className="w-4 h-4"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path 
+                            fillRule="evenodd" 
+                            d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" 
+                            clipRule="evenodd" 
+                          />
+                          </svg>
+                        </div>
+                      </button>
+                    )}
+                  </div>
 
                   <p className="text-gray-600 text-xs mb-2 line-clamp-2">
                     {job.description || 'No description available'}

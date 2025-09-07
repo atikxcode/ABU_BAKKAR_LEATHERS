@@ -1,10 +1,53 @@
 import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
+import { GridFSBucket } from 'mongodb'
 
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
+}
+
+// Helper function to handle PDF upload to GridFS
+const uploadPdfToGridFS = async (db, file, filename) => {
+  const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
+  
+  const uploadStream = bucket.openUploadStream(filename, {
+    metadata: {
+      contentType: file.type,
+      uploadedAt: new Date(),
+    }
+  })
+
+  const chunks = []
+  const reader = file.stream().getReader()
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+    }
+    
+    const buffer = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0))
+    let offset = 0
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset)
+      offset += chunk.length
+    }
+    
+    return new Promise((resolve, reject) => {
+      uploadStream.end(buffer, (error) => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve(uploadStream.id)
+        }
+      })
+    })
+  } catch (error) {
+    throw error
+  }
 }
 
 export async function GET(req) {
@@ -16,14 +59,18 @@ export async function GET(req) {
     const type = searchParams.get('type')
     const workerEmail = searchParams.get('workerEmail')
     const company = searchParams.get('company')
+    const downloadFile = searchParams.get('downloadFile')
+    const fileId = searchParams.get('fileId')
 
-    console.log(' Leather stock request:', {
+    console.log('🔍 Leather stock request:', {
       startDate,
       endDate,
       status,
       type,
       workerEmail,
       company,
+      downloadFile,
+      fileId,
     })
 
     const client = await clientPromise
@@ -31,6 +78,50 @@ export async function GET(req) {
     const collection = db.collection('leather')
     const usersCollection = db.collection('user')
 
+    // Handle PDF file download
+    if (downloadFile === 'true' && fileId) {
+      try {
+        if (!ObjectId.isValid(fileId)) {
+          return NextResponse.json(
+            { error: 'Invalid file ID format' },
+            { status: 400 }
+          )
+        }
+
+        const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
+        const downloadStream = bucket.openDownloadStream(new ObjectId(fileId))
+        
+        const chunks = []
+        for await (const chunk of downloadStream) {
+          chunks.push(chunk)
+        }
+        
+        const buffer = Buffer.concat(chunks)
+        const fileInfo = await bucket.find({ _id: new ObjectId(fileId) }).next()
+        
+        if (!fileInfo) {
+          return NextResponse.json(
+            { error: 'File not found' },
+            { status: 404 }
+          )
+        }
+
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': fileInfo.metadata?.contentType || 'application/pdf',
+            'Content-Disposition': `attachment; filename="${fileInfo.filename}"`,
+          },
+        })
+      } catch (error) {
+        console.error('❌ File download error:', error)
+        return NextResponse.json(
+          { error: 'File download failed' },
+          { status: 500 }
+        )
+      }
+    }
+
+    // Regular leather stock query
     let query = {}
 
     if (startDate && endDate) {
@@ -72,19 +163,37 @@ export async function GET(req) {
     )
 
     console.log(
-      ' Returning leather stock items with phone numbers:',
+      '✅ Returning leather stock items with phone numbers:',
       enrichedItems.length
     )
     return NextResponse.json(enrichedItems)
   } catch (err) {
-    console.error(' GET leather stock error:', err)
+    console.error('❌ GET leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
 export async function POST(req) {
   try {
-    const body = await req.json()
+    // Check if it's form data (for file uploads) or JSON
+    const contentType = req.headers.get('content-type')
+    let body = {}
+    let pdfFile = null
+
+    if (contentType && contentType.includes('multipart/form-data')) {
+      const formData = await req.formData()
+      
+      // Extract all form fields
+      for (const [key, value] of formData.entries()) {
+        if (key === 'pdfFile') {
+          pdfFile = value
+        } else {
+          body[key] = value
+        }
+      }
+    } else {
+      body = await req.json()
+    }
 
     if (
       !body.type ||
@@ -126,13 +235,52 @@ export async function POST(req) {
       )
     }
 
+    // PDF file validation
+    if (pdfFile && pdfFile.size > 0) {
+      if (pdfFile.type !== 'application/pdf') {
+        return NextResponse.json(
+          { error: 'Only PDF files are allowed' },
+          { status: 400 }
+        )
+      }
+
+      // Check file size (5MB limit)
+      const maxSize = 5 * 1024 * 1024 // 5MB
+      if (pdfFile.size > maxSize) {
+        return NextResponse.json(
+          { error: 'PDF file size must be less than 5MB' },
+          { status: 400 }
+        )
+      }
+    }
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
 
     const { workerName, workerEmail, ...rest } = body
 
-    const result = await collection.insertOne({
+    let pdfFileId = null
+    let pdfFileName = null
+
+    // Handle PDF upload if file exists
+    if (pdfFile && pdfFile.size > 0) {
+      try {
+        const timestamp = Date.now()
+        pdfFileName = `leather_${timestamp}_${pdfFile.name}`
+        pdfFileId = await uploadPdfToGridFS(db, pdfFile, pdfFileName)
+        console.log('📁 PDF uploaded successfully with ID:', pdfFileId)
+      } catch (uploadError) {
+        console.error('❌ PDF upload error:', uploadError)
+        return NextResponse.json(
+          { error: 'Failed to upload PDF file' },
+          { status: 500 }
+        )
+      }
+    }
+
+    // Create the document
+    const document = {
       ...rest,
       type: body.type.trim(),
       company: body.company.trim(),
@@ -143,12 +291,30 @@ export async function POST(req) {
       date: new Date(body.date) || new Date(),
       status: body.status || 'pending',
       createdAt: new Date(),
-    })
+    }
 
-    console.log(' Created leather stock entry:', result.insertedId)
-    return NextResponse.json(result, { status: 201 })
+    // Add PDF information if uploaded
+    if (pdfFileId) {
+      document.pdfFile = {
+        fileId: pdfFileId,
+        fileName: pdfFileName,
+        uploadedAt: new Date(),
+      }
+    }
+
+    const result = await collection.insertOne(document)
+
+    console.log('✅ Created leather stock entry:', result.insertedId)
+    return NextResponse.json(
+      { 
+        ...result, 
+        message: pdfFile ? 'Leather stock entry created with PDF file' : 'Leather stock entry created',
+        fileUploaded: !!pdfFileId 
+      }, 
+      { status: 201 }
+    )
   } catch (err) {
-    console.error(' POST leather stock error:', err)
+    console.error('❌ POST leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -156,7 +322,7 @@ export async function POST(req) {
 export async function PATCH(req) {
   try {
     if (!isAdmin(req)) {
-      console.warn(' Unauthorized PATCH attempt on leather stock')
+      console.warn('⚠️ Unauthorized PATCH attempt on leather stock')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -165,7 +331,26 @@ export async function PATCH(req) {
 
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
-    const body = await req.json()
+    
+    // Check if it's form data (for file updates) or JSON
+    const contentType = req.headers.get('content-type')
+    let body = {}
+    let pdfFile = null
+
+    if (contentType && contentType.includes('multipart/form-data')) {
+      const formData = await req.formData()
+      
+      // Extract all form fields
+      for (const [key, value] of formData.entries()) {
+        if (key === 'pdfFile') {
+          pdfFile = value
+        } else {
+          body[key] = value
+        }
+      }
+    } else {
+      body = await req.json()
+    }
 
     if (!id) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 })
@@ -195,6 +380,24 @@ export async function PATCH(req) {
       )
     }
 
+    // PDF file validation
+    if (pdfFile && pdfFile.size > 0) {
+      if (pdfFile.type !== 'application/pdf') {
+        return NextResponse.json(
+          { error: 'Only PDF files are allowed' },
+          { status: 400 }
+        )
+      }
+
+      const maxSize = 5 * 1024 * 1024 // 5MB
+      if (pdfFile.size > maxSize) {
+        return NextResponse.json(
+          { error: 'PDF file size must be less than 5MB' },
+          { status: 400 }
+        )
+      }
+    }
+
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
@@ -202,6 +405,44 @@ export async function PATCH(req) {
     const updateData = { ...body, updatedAt: new Date() }
     if (body.quantity !== undefined) {
       updateData.quantity = Number(body.quantity)
+    }
+
+    // Handle PDF file update
+    if (pdfFile && pdfFile.size > 0) {
+      try {
+        // Get existing document to delete old file if exists
+        const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
+        
+        // Delete old PDF file if exists
+        if (existingDoc?.pdfFile?.fileId) {
+          const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
+          try {
+            await bucket.delete(new ObjectId(existingDoc.pdfFile.fileId))
+            console.log('🗑️ Old PDF file deleted')
+          } catch (deleteError) {
+            console.warn('⚠️ Failed to delete old PDF file:', deleteError)
+          }
+        }
+
+        // Upload new PDF file
+        const timestamp = Date.now()
+        const pdfFileName = `leather_${timestamp}_${pdfFile.name}`
+        const pdfFileId = await uploadPdfToGridFS(db, pdfFile, pdfFileName)
+        
+        updateData.pdfFile = {
+          fileId: pdfFileId,
+          fileName: pdfFileName,
+          uploadedAt: new Date(),
+        }
+        
+        console.log('📁 New PDF uploaded successfully with ID:', pdfFileId)
+      } catch (uploadError) {
+        console.error('❌ PDF upload error:', uploadError)
+        return NextResponse.json(
+          { error: 'Failed to upload PDF file' },
+          { status: 500 }
+        )
+      }
     }
 
     const result = await collection.updateOne(
@@ -216,10 +457,13 @@ export async function PATCH(req) {
       )
     }
 
-    console.log(' Updated leather stock entry:', id)
-    return NextResponse.json(result)
+    console.log('✅ Updated leather stock entry:', id)
+    return NextResponse.json({ 
+      ...result, 
+      message: pdfFile ? 'Leather stock entry updated with new PDF file' : 'Leather stock entry updated' 
+    })
   } catch (err) {
-    console.error(' PATCH leather stock error:', err)
+    console.error('❌ PATCH leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
@@ -227,7 +471,7 @@ export async function PATCH(req) {
 export async function DELETE(req) {
   try {
     if (!isAdmin(req)) {
-      console.warn(' Unauthorized DELETE attempt on leather stock')
+      console.warn('⚠️ Unauthorized DELETE attempt on leather stock')
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -245,6 +489,21 @@ export async function DELETE(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
+    const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
+
+    // Helper function to delete associated PDF files
+    const deleteAssociatedFiles = async (documents) => {
+      for (const doc of documents) {
+        if (doc.pdfFile?.fileId) {
+          try {
+            await bucket.delete(new ObjectId(doc.pdfFile.fileId))
+            console.log('🗑️ Deleted PDF file:', doc.pdfFile.fileName)
+          } catch (fileDeleteError) {
+            console.warn('⚠️ Failed to delete PDF file:', fileDeleteError)
+          }
+        }
+      }
+    }
 
     if (deleteType === 'single' && id) {
       if (!ObjectId.isValid(id)) {
@@ -254,17 +513,21 @@ export async function DELETE(req) {
         )
       }
 
-      const result = await collection.deleteOne({ _id: new ObjectId(id) })
-
-      if (result.deletedCount === 0) {
-        console.log(` DELETE failed: Stock entry ${id} not found`)
+      // Get document first to delete associated file
+      const document = await collection.findOne({ _id: new ObjectId(id) })
+      if (!document) {
         return NextResponse.json(
           { error: 'Stock entry not found' },
           { status: 404 }
         )
       }
 
-      console.log(` Single stock entry ${id} deleted successfully`)
+      // Delete associated PDF file if exists
+      await deleteAssociatedFiles([document])
+
+      const result = await collection.deleteOne({ _id: new ObjectId(id) })
+
+      console.log(`✅ Single stock entry ${id} deleted successfully`)
       return NextResponse.json({
         message: 'Stock entry deleted successfully',
         deletedCount: result.deletedCount,
@@ -293,10 +556,14 @@ export async function DELETE(req) {
         )
       }
 
+      // Get documents first to delete associated files
+      const documentsToDelete = await collection.find(query).toArray()
+      await deleteAssociatedFiles(documentsToDelete)
+
       const result = await collection.deleteMany(query)
 
       console.log(
-        ` Bulk delete completed: ${result.deletedCount} entries deleted`
+        `✅ Bulk delete completed: ${result.deletedCount} entries deleted`
       )
       return NextResponse.json({
         message: `${result.deletedCount} stock entries deleted successfully`,
@@ -312,14 +579,19 @@ export async function DELETE(req) {
         )
       }
 
-      const result = await collection.deleteOne({ _id: new ObjectId(id) })
-
-      if (result.deletedCount === 0) {
+      // Get document first to delete associated file
+      const document = await collection.findOne({ _id: new ObjectId(id) })
+      if (!document) {
         return NextResponse.json(
           { error: 'Stock entry not found' },
           { status: 404 }
         )
       }
+
+      // Delete associated PDF file if exists
+      await deleteAssociatedFiles([document])
+
+      const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
       return NextResponse.json({ message: 'Deleted successfully', result })
     }
@@ -331,7 +603,7 @@ export async function DELETE(req) {
       { status: 400 }
     )
   } catch (err) {
-    console.error(' DELETE leather stock error:', err)
+    console.error('❌ DELETE leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

@@ -9,6 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@syncfusion/ej2-base": "^31.1.17",
+    "@syncfusion/ej2-buttons": "^31.1.17",
+    "@syncfusion/ej2-dropdowns": "^31.1.17",
+    "@syncfusion/ej2-grids": "^31.1.17",
+    "@syncfusion/ej2-lists": "^31.1.17",
+    "@syncfusion/ej2-navigations": "^31.1.17",
+    "@syncfusion/ej2-popups": "^31.1.17",
+    "@syncfusion/ej2-react-grids": "^31.1.17",
+    "@syncfusion/ej2-react-spreadsheet": "^31.1.17",
+    "@syncfusion/ej2-splitbuttons": "^31.1.17",
     "date-fns": "^4.1.0",
     "firebase": "^12.1.0",
     "framer-motion": "^12.23.12",

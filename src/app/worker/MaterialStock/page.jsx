@@ -25,6 +25,7 @@ export default function MaterialStockPage() {
   const [filterMaterial, setFilterMaterial] = useState('all')
   const [filterCompany, setFilterCompany] = useState('all')
   const [currentUser, setCurrentUser] = useState(null)
+  const [pdfFile, setPdfFile] = useState(null) // Added PDF file state
   const [dateRange, setDateRange] = useState({
     startDate: '',
     endDate: '',
@@ -44,6 +45,27 @@ export default function MaterialStockPage() {
       unit: 'kg',
     },
   })
+
+  // Handle PDF file selection
+  const handlePdfChange = (e) => {
+    const file = e.target.files[0]
+    
+    if (file && file.type !== 'application/pdf') {
+      Swal.fire('Error', 'Please select a valid PDF file', 'error')
+      e.target.value = '' // Clear the input
+      return
+    }
+    
+    // Check file size (5MB limit)
+    if (file && file.size > 5 * 1024 * 1024) {
+      Swal.fire('Error', 'PDF file size must be less than 5MB', 'error')
+      e.target.value = '' // Clear the input
+      return
+    }
+    
+    setPdfFile(file)
+    console.log('📄 PDF selected:', file?.name, file?.size)
+  }
 
   // Fetch current user from database
   const fetchCurrentUser = async () => {
@@ -91,7 +113,7 @@ export default function MaterialStockPage() {
     }
   }, [userEmail])
 
-  // Submit material stock report
+  // Submit material stock report with PDF support
   const onSubmit = async (data) => {
     const workerName = currentUser?.name || userName || 'Unknown Worker'
     const workerEmail = userEmail
@@ -107,33 +129,49 @@ export default function MaterialStockPage() {
 
     setLoading(true)
     try {
+      // Use FormData to handle both regular data and file upload
+      const formData = new FormData()
+      
+      // Append form data
+      formData.append('date', data.date)
+      formData.append('material', data.material.trim().toLowerCase())
+      formData.append('company', data.company.trim())
+      formData.append('quantity', Number(data.quantity))
+      formData.append('unit', data.unit)
+      formData.append('status', 'pending')
+      formData.append('workerName', workerName)
+      formData.append('workerEmail', workerEmail)
+      
+      // Append PDF file if selected
+      if (pdfFile) {
+        formData.append('pdfFile', pdfFile)
+      }
+
       const response = await fetch('/api/stock/materials', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...data,
-          material: data.material.trim().toLowerCase(),
-          company: data.company.trim(),
-          quantity: Number(data.quantity),
-          status: 'pending',
-          workerName: workerName,
-          workerEmail: workerEmail,
-        }),
+        body: formData, // Don't set Content-Type header - let browser handle it
       })
 
       if (response.ok) {
+        const result = await response.json()
         Swal.fire(
           'Success!',
-          'Material stock report submitted successfully',
+          result.message || 'Material stock report submitted successfully',
           'success'
         )
         reset()
+        setPdfFile(null) // Clear PDF file state
+        
+        // Clear file input
+        const fileInput = document.querySelector('input[type="file"]')
+        if (fileInput) fileInput.value = ''
+        
         fetchStocks()
       } else {
         const error = await response.json()
         Swal.fire(
           'Error',
-          error.message || 'Failed to submit material stock report',
+          error.error || 'Failed to submit material stock report',
           'error'
         )
       }
@@ -486,7 +524,7 @@ export default function MaterialStockPage() {
           </div>
         </div>
 
-        {/* Submit New Material Stock Form */}
+        {/* Submit New Material Stock Form with PDF Upload */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-amber-200">
           <h2 className="text-xl font-semibold text-amber-900 mb-4">
             Submit New Material Stock Report
@@ -494,7 +532,7 @@ export default function MaterialStockPage() {
 
           <form
             onSubmit={handleSubmit(onSubmit)}
-            className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end"
+            className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end"
           >
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
@@ -575,7 +613,7 @@ export default function MaterialStockPage() {
               </label>
               <select
                 {...register('unit', { required: 'Unit is required' })}
-                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none mb-2"
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none"
               >
                 <option value="kg">Kilogram</option>
                 <option value="liter">Liter</option>
@@ -583,15 +621,38 @@ export default function MaterialStockPage() {
                 <option value="roll">Roll</option>
                 <option value="meter">Meter</option>
               </select>
-              <button
-                type="submit"
-                disabled={loading || !userEmail}
-                className="w-full bg-amber-900 text-white py-2 px-4 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 font-medium"
-              >
-                {loading ? 'Submitting...' : 'Submit Report'}
-              </button>
+            </div>
+
+            {/* PDF Upload Field */}
+            <div>
+              <label className="block text-sm font-medium text-amber-900 mb-1">
+                Upload PDF
+              </label>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handlePdfChange}
+                className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none text-sm"
+              />
+              {pdfFile && (
+                <p className="text-xs text-green-600 mt-1">
+                  Selected: {pdfFile.name}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">Max size: 5MB</p>
             </div>
           </form>
+
+          {/* Submit Button */}
+          <div className="mt-4">
+            <button
+              onClick={handleSubmit(onSubmit)}
+              disabled={loading || !userEmail}
+              className="w-full bg-amber-900 text-white py-3 px-4 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 font-medium"
+            >
+              {loading ? 'Submitting...' : 'Submit Report'}
+            </button>
+          </div>
         </div>
 
         {/* Download Reports Section */}
@@ -854,14 +915,29 @@ export default function MaterialStockPage() {
                       )}
                       {showMyStocks && (
                         <td className="px-4 py-3 border border-gray-300 text-center">
-                          <button
-                            onClick={() => downloadSingleReportPDF(stock)}
-                            disabled={downloadLoading}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1 mx-auto"
-                          >
-                            <FaFilePdf className="text-xs" />
-                            {downloadLoading ? 'PDF...' : 'PDF'}
-                          </button>
+                          <div className="flex items-center justify-center gap-2">
+                            {/* Download PDF of attached file */}
+                            {stock.pdfFile?.fileId && (
+                              <button
+                                onClick={() => window.open(`/api/stock/materials?downloadFile=true&fileId=${stock.pdfFile.fileId}`, '_blank')}
+                                className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition flex items-center gap-1"
+                                title="Download attached PDF"
+                              >
+                                <FaDownload className="text-xs" />
+                                PDF
+                              </button>
+                            )}
+                            {/* Generate report PDF */}
+                            <button
+                              onClick={() => downloadSingleReportPDF(stock)}
+                              disabled={downloadLoading}
+                              className="bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1"
+                              title="Generate report PDF"
+                            >
+                              <FaFilePdf className="text-xs" />
+                              {downloadLoading ? 'PDF...' : 'Report'}
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>

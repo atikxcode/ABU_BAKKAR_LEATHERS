@@ -7,6 +7,7 @@ import AuthProvider from '../../Provider/AuthProvider'
 
 // import { Toaster } from 'react-hot-toast'
 import { usePathname } from 'next/navigation'
+import { registerLicense } from '@syncfusion/ej2-base'
 
 const josefinSans = Josefin_Sans({
   variable: '--font-primary',
@@ -20,6 +21,7 @@ const josefinSans = Josefin_Sans({
 // }
 
 export default function RootLayout({ children }) {
+  registerLicense(process.env.NEXT_PUBLIC_SYNCFUSION);
   const pathname = usePathname()
   // const isAdminRoute = pathname.startsWith('/admin') // 👈 detect admin
 
