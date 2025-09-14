@@ -25,7 +25,9 @@ export default function LeatherStockPage() {
   const [filterType, setFilterType] = useState('all')
   const [filterCompany, setFilterCompany] = useState('all')
   const [currentUser, setCurrentUser] = useState(null)
-  const [pdfFile, setPdfFile] = useState(null) // Added PDF file state
+  const [pdfFile, setPdfFile] = useState(null)
+  const [netStockData, setNetStockData] = useState({})
+  const [statistics, setStatistics] = useState({})
   const [dateRange, setDateRange] = useState({
     startDate: '',
     endDate: '',
@@ -52,14 +54,14 @@ export default function LeatherStockPage() {
     
     if (file && file.type !== 'application/pdf') {
       Swal.fire('Error', 'Please select a valid PDF file', 'error')
-      e.target.value = '' // Clear the input
+      e.target.value = ''
       return
     }
     
     // Check file size (5MB limit)
     if (file && file.size > 5 * 1024 * 1024) {
       Swal.fire('Error', 'PDF file size must be less than 5MB', 'error')
-      e.target.value = '' // Clear the input
+      e.target.value = ''
       return
     }
     
@@ -88,19 +90,41 @@ export default function LeatherStockPage() {
       const res = await fetch('/api/stock/leather')
       if (res.ok) {
         const data = await res.json()
-        setStocks(data)
+        console.log('📊 API Response:', data)
+        
+        // Handle the new API response structure
+        let stockItems = []
+        
+        if (Array.isArray(data)) {
+          // If data is directly an array (backward compatibility)
+          stockItems = data
+        } else if (data && Array.isArray(data.items)) {
+          // If data has items property (new structure)
+          stockItems = data.items
+          setNetStockData(data.netStock || {})
+          setStatistics(data.statistics || {})
+        } else {
+          console.error('❌ Unexpected API response structure:', data)
+          Swal.fire('Error', 'Unexpected data format from server', 'error')
+          return
+        }
 
-        const my = data.filter((stock) => stock.workerEmail === userEmail)
-        const others = data.filter((stock) => stock.workerEmail !== userEmail)
+        setStocks(stockItems)
+
+        // Filter stocks by user
+        const my = stockItems.filter((stock) => stock.workerEmail === userEmail)
+        const others = stockItems.filter((stock) => stock.workerEmail !== userEmail)
 
         setMyStocks(my)
         setOthersStocks(others)
       } else {
-        Swal.fire('Error', 'Failed to fetch stock data', 'error')
+        const errorData = await res.json()
+        console.error('❌ API Error:', errorData)
+        Swal.fire('Error', errorData.error || 'Failed to fetch stock data', 'error')
       }
     } catch (err) {
-      console.error('Error fetching stock:', err)
-      Swal.fire('Error', 'Network error occurred', 'error')
+      console.error('❌ Network Error:', err)
+      Swal.fire('Error', 'Network error occurred while fetching data', 'error')
     } finally {
       setLoading(false)
     }
@@ -149,7 +173,7 @@ export default function LeatherStockPage() {
 
       const response = await fetch('/api/stock/leather', {
         method: 'POST',
-        body: formData, // Don't set Content-Type header - let browser handle it
+        body: formData,
       })
 
       if (response.ok) {
@@ -160,13 +184,13 @@ export default function LeatherStockPage() {
           'success'
         )
         reset()
-        setPdfFile(null) // Clear PDF file state
+        setPdfFile(null)
         
         // Clear file input
         const fileInput = document.querySelector('input[type="file"]')
         if (fileInput) fileInput.value = ''
         
-        fetchStocks()
+        await fetchStocks() // Refetch data after successful submission
       } else {
         const error = await response.json()
         Swal.fire(
@@ -176,14 +200,14 @@ export default function LeatherStockPage() {
         )
       }
     } catch (err) {
-      console.error('Error submitting stock:', err)
-      Swal.fire('Error', 'Network error occurred', 'error')
+      console.error('❌ Submit Error:', err)
+      Swal.fire('Error', 'Network error occurred while submitting', 'error')
     } finally {
       setLoading(false)
     }
   }
 
-  // PDF Generation Function (unchanged)
+  // PDF Generation Function
   const generatePDF = (
     data,
     filename,
@@ -292,7 +316,7 @@ export default function LeatherStockPage() {
     doc.save(filename)
   }
 
-  // Download single stock report as PDF (unchanged)
+  // Download single stock report as PDF
   const downloadSingleReportPDF = async (stock) => {
     setDownloadLoading(true)
     try {
@@ -358,18 +382,18 @@ export default function LeatherStockPage() {
         'success'
       )
     } catch (err) {
-      console.error('Error downloading single report:', err)
+      console.error('❌ PDF Generation Error:', err)
       Swal.fire('Error', 'Failed to download report', 'error')
     } finally {
       setDownloadLoading(false)
     }
   }
 
-  // Download all my reports as PDF (unchanged)
+  // Download all my reports as PDF
   const downloadAllMyReportsPDF = async () => {
     setDownloadLoading(true)
     try {
-      let filteredStocks = myStocks
+      let filteredStocks = [...myStocks]
 
       // Apply date range filter if specified
       if (dateRange.startDate && dateRange.endDate) {
@@ -400,14 +424,14 @@ export default function LeatherStockPage() {
 
       Swal.fire('Success!', 'All reports downloaded successfully', 'success')
     } catch (err) {
-      console.error('Error downloading all reports:', err)
+      console.error('❌ Download Error:', err)
       Swal.fire('Error', 'Failed to download reports', 'error')
     } finally {
       setDownloadLoading(false)
     }
   }
 
-  // Download filtered reports by current filters (unchanged)
+  // Download filtered reports by current filters
   const downloadFilteredReportsPDF = async () => {
     setDownloadLoading(true)
     try {
@@ -438,19 +462,29 @@ export default function LeatherStockPage() {
         'success'
       )
     } catch (err) {
-      console.error('Error downloading filtered reports:', err)
+      console.error('❌ Filtered Download Error:', err)
       Swal.fire('Error', 'Failed to download filtered reports', 'error')
     } finally {
       setDownloadLoading(false)
     }
   }
 
-  // Get unique values for filters (unchanged)
-  const leatherTypes = [...new Set(stocks.map((stock) => stock.type))].sort()
-  const companies = [...new Set(stocks.map((stock) => stock.company))].sort()
+  // Get unique values for filters with safety checks
+  const leatherTypes = stocks && Array.isArray(stocks) 
+    ? [...new Set(stocks.map((stock) => stock.type).filter(Boolean))].sort()
+    : []
+  
+  const companies = stocks && Array.isArray(stocks)
+    ? [...new Set(stocks.map((stock) => stock.company).filter(Boolean))].sort()
+    : []
 
-  // Filter stocks function (unchanged)
+  // Filter stocks function with safety checks
   const filterStocks = (stockArray) => {
+    if (!Array.isArray(stockArray)) {
+      console.warn('⚠️ filterStocks received non-array:', stockArray)
+      return []
+    }
+    
     return stockArray.filter((stock) => {
       const matchesSearch =
         stock.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -474,14 +508,19 @@ export default function LeatherStockPage() {
     ? filteredMyStocks
     : filteredOthersStocks
 
-  // Calculate statistics (unchanged)
-  const myPendingCount = myStocks.filter((s) => s.status === 'pending').length
-  const myApprovedCount = myStocks.filter((s) => s.status === 'approved').length
-  const myRejectedCount = myStocks.filter((s) => s.status === 'rejected').length
-  const myTotalQuantity = myStocks.reduce(
-    (sum, s) => sum + (s.quantity || 0),
-    0
-  )
+  // Calculate statistics with safety checks
+  const myPendingCount = Array.isArray(myStocks) 
+    ? myStocks.filter((s) => s.status === 'pending').length 
+    : 0
+  const myApprovedCount = Array.isArray(myStocks)
+    ? myStocks.filter((s) => s.status === 'approved').length
+    : 0
+  const myRejectedCount = Array.isArray(myStocks)
+    ? myStocks.filter((s) => s.status === 'rejected').length
+    : 0
+  const myTotalQuantity = Array.isArray(myStocks)
+    ? myStocks.reduce((sum, s) => sum + (s.quantity || 0), 0)
+    : 0
 
   return (
     <div className="min-h-screen p-4 bg-amber-50">
@@ -699,7 +738,7 @@ export default function LeatherStockPage() {
                 className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition disabled:opacity-50 font-medium flex items-center gap-2"
               >
                 <FaFilter />
-                {downloadLoading ? 'Downloading...' : 'Download Filtered'}
+                {downloadLoading ? 'Downloading..' : 'Download Filtered'}
               </button>
             </div>
           </div>

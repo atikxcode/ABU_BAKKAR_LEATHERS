@@ -3,9 +3,18 @@ import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 import { GridFSBucket } from 'mongodb'
 
+// Authentication helper (enhanced)
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
+}
+
+// Helper function to get client IP for audit trail
+const getClientIP = (req) => {
+  const forwarded = req.headers.get('x-forwarded-for')
+  const realIP = req.headers.get('x-real-ip')
+  const clientIP = forwarded ? forwarded.split(',')[0] : realIP
+  return clientIP || 'unknown'
 }
 
 // Helper function to handle PDF upload to GridFS
@@ -50,6 +59,74 @@ const uploadPdfToGridFS = async (db, file, filename) => {
   }
 }
 
+// FIXED: NEW function to calculate net available stock (original - total removed)
+// This does NOT modify original submissions - only calculates net availability
+const calculateNetAvailableStock = async (db) => {
+  console.log('🔍 Calculating net available stock...')
+  
+  const leatherCollection = db.collection('leather')
+  const stockRemovalLogCollection = db.collection('stock_removal_logs')
+  
+  // Get all approved leather entries (original submissions - NEVER MODIFIED)
+  const approvedEntries = await leatherCollection
+    .find({ status: 'approved' })
+    .toArray()
+  
+  // Get all completed stock removals
+  const allRemovals = await stockRemovalLogCollection
+    .find({ status: 'completed' })
+    .toArray()
+  
+  // Calculate net stock by type
+  const stockByType = {}
+  
+  // First, add all approved stock (original quantities)
+  approvedEntries.forEach(entry => {
+    if (!stockByType[entry.type]) {
+      stockByType[entry.type] = {
+        totalOriginal: 0,
+        totalRemoved: 0,
+        netAvailable: 0,
+        entries: []
+      }
+    }
+    stockByType[entry.type].totalOriginal += entry.quantity
+    stockByType[entry.type].entries.push({
+      id: entry._id,
+      quantity: entry.quantity, // Original quantity - never changed
+      workerName: entry.workerName,
+      company: entry.company,
+      date: entry.date,
+      submissionDate: entry.createdAt
+    })
+  })
+  
+  // Then, subtract all removals
+  allRemovals.forEach(removal => {
+    if (stockByType[removal.stockType]) {
+      stockByType[removal.stockType].totalRemoved += removal.actualRemovedQuantity
+    }
+  })
+  
+  // Calculate net available
+  Object.keys(stockByType).forEach(type => {
+    const stock = stockByType[type]
+    stock.netAvailable = Math.max(0, stock.totalOriginal - stock.totalRemoved)
+    
+    // Add percentage consumed
+    stock.percentageConsumed = stock.totalOriginal > 0 
+      ? ((stock.totalRemoved / stock.totalOriginal) * 100).toFixed(2)
+      : 0
+  })
+  
+  console.log('📊 Net stock calculated:', Object.keys(stockByType).length, 'types')
+  return stockByType
+}
+
+// REMOVED: The old updateCombinedStockAfterRemoval function
+// This was the problematic function that modified original worker submissions
+// Stock removal is now handled by the separate /api/stock/removal endpoint
+
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url)
@@ -61,6 +138,8 @@ export async function GET(req) {
     const company = searchParams.get('company')
     const downloadFile = searchParams.get('downloadFile')
     const fileId = searchParams.get('fileId')
+    const includeRemovalHistory = searchParams.get('includeRemovalHistory')
+    const getNetStock = searchParams.get('getNetStock') // NEW: Get net available stock
 
     console.log('🔍 Leather stock request:', {
       startDate,
@@ -71,6 +150,8 @@ export async function GET(req) {
       company,
       downloadFile,
       fileId,
+      includeRemovalHistory,
+      getNetStock,
     })
 
     const client = await clientPromise
@@ -121,7 +202,101 @@ export async function GET(req) {
       }
     }
 
-    // Regular leather stock query
+    // NEW: Handle net stock calculation request
+    // FIXED: Handle net stock calculation request - include original submissions
+if (getNetStock === 'true') {
+  console.log('🔍 Getting net stock WITH original submissions...')
+  
+  // Get the net stock data
+  const netStockData = await calculateNetAvailableStock(db)
+  
+  // ALSO get the original submissions (same query logic as below)
+  let query = {}
+  
+  if (startDate && endDate) {
+    query.date = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate + 'T23:59:59.999Z'),
+    }
+  }
+
+  if (status && status !== 'all') query.status = status
+  if (type) query.type = new RegExp(type, 'i')
+  if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
+  if (company) query.company = new RegExp(company, 'i')
+
+  // Get original submissions
+  const items = await collection.find(query).sort({ date: -1 }).toArray()
+
+  // Enrich items with worker phone numbers
+  const enrichedItems = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const worker = await usersCollection.findOne({
+          email: item.workerEmail,
+        })
+        
+        return {
+          ...item,
+          workerPhone: worker?.phone || worker?.phoneNumber || 'N/A',
+          
+          // Add net stock context for this type
+          netStockInfo: netStockData[item.type] ? {
+            totalOriginalInSystem: netStockData[item.type].totalOriginal,
+            totalRemovedFromSystem: netStockData[item.type].totalRemoved,
+            netAvailableInSystem: netStockData[item.type].netAvailable,
+            percentageConsumed: netStockData[item.type].percentageConsumed
+          } : null,
+          
+          // This entry's contribution to the system
+          contributionToStock: item.status === 'approved' ? item.quantity : 0,
+          
+          // Metadata
+          lastModifiedDate: item.updatedAt || item.createdAt,
+          isOriginalSubmission: true,
+          originalQuantityPreserved: item.quantity,
+        }
+      } catch (err) {
+        console.error('Error fetching worker info for email:', item.workerEmail, err)
+        return {
+          ...item,
+          workerPhone: 'N/A',
+        }
+      }
+    })
+  )
+
+  // Enhanced response with BOTH items and net stock
+  const responseData = {
+    items: enrichedItems, // ✅ This was missing!
+    netStock: netStockData,
+    statistics: {
+      totalItems: enrichedItems.length,
+      approvedItems: enrichedItems.filter(item => item.status === 'approved').length,
+      totalOriginalQuantity: enrichedItems.reduce((sum, item) => sum + (item.status === 'approved' ? item.quantity : 0), 0),
+      totalNetAvailable: Object.values(netStockData).reduce((sum, stock) => sum + stock.netAvailable, 0),
+      totalRemoved: Object.values(netStockData).reduce((sum, stock) => sum + stock.totalRemoved, 0),
+      stockTypes: Object.entries(netStockData).map(([type, data]) => ({
+        type,
+        originalQuantity: data.totalOriginal,
+        totalRemoved: data.totalRemoved,
+        netAvailable: data.netAvailable,
+        percentageConsumed: data.percentageConsumed,
+        submissionCount: data.entries.length,
+        workerContributions: data.entries.length
+      }))
+    },
+    generatedAt: new Date(),
+    dataIntegrityNote: "Original worker submissions are preserved. Net quantities calculated separately.",
+    message: 'Original submissions and net stock data retrieved successfully'
+  }
+
+  console.log('✅ Returning', enrichedItems.length, 'original submissions WITH net stock data')
+  return NextResponse.json(responseData)
+}
+
+
+    // Regular leather stock query (NEVER MODIFIED - these are original submissions)
     let query = {}
 
     if (startDate && endDate) {
@@ -136,7 +311,17 @@ export async function GET(req) {
     if (workerEmail) query.workerEmail = new RegExp(workerEmail, 'i')
     if (company) query.company = new RegExp(company, 'i')
 
-    const items = await collection.find(query).sort({ date: -1 }).toArray()
+    let projection = {}
+    // FIXED: Remove problematic removalHistory field as it's no longer used
+    if (includeRemovalHistory !== 'true') {
+      projection = {}
+    }
+
+    // Get original submissions (NEVER MODIFIED)
+    const items = await collection.find(query, { projection }).sort({ date: -1 }).toArray()
+
+    // Get net stock data for additional context
+    const netStockData = await calculateNetAvailableStock(db)
 
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
@@ -144,10 +329,36 @@ export async function GET(req) {
           const worker = await usersCollection.findOne({
             email: item.workerEmail,
           })
-          return {
+          
+          // Enhanced item with net stock context
+          const enrichedItem = {
             ...item,
             workerPhone: worker?.phone || worker?.phoneNumber || 'N/A',
+            
+            // Add net stock context for this type
+            netStockInfo: netStockData[item.type] ? {
+              totalOriginalInSystem: netStockData[item.type].totalOriginal,
+              totalRemovedFromSystem: netStockData[item.type].totalRemoved,
+              netAvailableInSystem: netStockData[item.type].netAvailable,
+              percentageConsumed: netStockData[item.type].percentageConsumed
+            } : null,
+            
+            // This entry's contribution to the system
+            contributionToStock: item.status === 'approved' ? item.quantity : 0,
+            
+            // FIXED: Remove problematic legacy fields
+            // removalSummary: removed as it was based on modified data
+            // netQuantity: item.quantity (this is always original quantity now)
+            // hasBeenReduced: removed as it was misleading
+            // isFullyConsumed: removed as original entries are never consumed
+            
+            // Metadata
+            lastModifiedDate: item.updatedAt || item.createdAt,
+            isOriginalSubmission: true, // Mark as original - never modified
+            originalQuantityPreserved: item.quantity, // Preserve original for clarity
           }
+          
+          return enrichedItem
         } catch (err) {
           console.error(
             'Error fetching worker info for email:',
@@ -162,11 +373,44 @@ export async function GET(req) {
       })
     )
 
+    // Enhanced response with net stock summary
+    const responseData = {
+      items: enrichedItems, // Original submissions - never modified
+      netStock: netStockData, // Net available stock after removals
+      statistics: {
+        totalItems: enrichedItems.length,
+        approvedItems: enrichedItems.filter(item => item.status === 'approved').length,
+        totalOriginalQuantity: enrichedItems.reduce((sum, item) => sum + (item.status === 'approved' ? item.quantity : 0), 0),
+        
+        // FIXED: Remove problematic legacy statistics
+        // totalWithRemovalHistory: removed as we don't track this anymore
+        // fullyConsumedItems: removed as original entries are never consumed
+        
+        // Net stock statistics
+        totalNetAvailable: Object.values(netStockData).reduce((sum, stock) => sum + stock.netAvailable, 0),
+        totalRemoved: Object.values(netStockData).reduce((sum, stock) => sum + stock.totalRemoved, 0),
+        
+        // Stock type breakdown with net quantities
+        stockTypes: Object.entries(netStockData).map(([type, data]) => ({
+          type,
+          originalQuantity: data.totalOriginal,
+          totalRemoved: data.totalRemoved,
+          netAvailable: data.netAvailable,
+          percentageConsumed: data.percentageConsumed,
+          submissionCount: data.entries.length,
+          workerContributions: data.entries.length
+        }))
+      },
+      generatedAt: new Date(),
+      dataIntegrityNote: "Original worker submissions are preserved. Net quantities calculated separately."
+    }
+
     console.log(
-      '✅ Returning leather stock items with phone numbers:',
-      enrichedItems.length
+      '✅ Returning original submissions + net stock data:',
+      enrichedItems.length,
+      'items'
     )
-    return NextResponse.json(enrichedItems)
+    return NextResponse.json(responseData)
   } catch (err) {
     console.error('❌ GET leather stock error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -195,6 +439,7 @@ export async function POST(req) {
       body = await req.json()
     }
 
+    // Enhanced validation
     if (
       !body.type ||
       typeof body.type !== 'string' ||
@@ -257,6 +502,7 @@ export async function POST(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
+    const auditCollection = db.collection('audit_logs')
 
     const { workerName, workerEmail, ...rest } = body
 
@@ -279,18 +525,34 @@ export async function POST(req) {
       }
     }
 
-    // Create the document
+    // Create the enhanced document (ORIGINAL SUBMISSION - NEVER MODIFIED)
+    const quantity = Number(body.quantity)
     const document = {
       ...rest,
       type: body.type.trim(),
       company: body.company.trim(),
-      quantity: Number(body.quantity),
+      quantity: quantity, // ORIGINAL QUANTITY - NEVER CHANGES
       unit: body.unit.trim(),
       workerName: workerName || 'Unknown',
       workerEmail: workerEmail || 'unknown@example.com',
       date: new Date(body.date) || new Date(),
       status: body.status || 'pending',
       createdAt: new Date(),
+      updatedAt: new Date(),
+      
+      // FIXED: Remove problematic tracking fields that were being modified
+      // removalHistory: [], // REMOVED - this was causing confusion
+      // totalRemoved: 0,    // REMOVED - calculated separately now
+      lastModifiedBy: 'system',
+      lastModifiedReason: 'initial_creation',
+      
+      // Metadata
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      
+      // Mark as original submission
+      isOriginalSubmission: true,
+      submissionPreserved: true,
     }
 
     // Add PDF information if uploaded
@@ -304,12 +566,32 @@ export async function POST(req) {
 
     const result = await collection.insertOne(document)
 
-    console.log('✅ Created leather stock entry:', result.insertedId)
+    // Create audit log
+    await auditCollection.insertOne({
+      action: 'leather_stock_created',
+      resourceType: 'leather',
+      resourceId: result.insertedId,
+      details: {
+        stockType: body.type,
+        quantity: quantity,
+        company: body.company,
+        workerName: workerName,
+        hasPdfFile: !!pdfFileId,
+        note: 'Original submission - will never be modified'
+      },
+      timestamp: new Date(),
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      success: true
+    })
+
+    console.log('✅ Created original leather stock submission:', result.insertedId)
     return NextResponse.json(
       { 
         ...result, 
-        message: pdfFile ? 'Leather stock entry created with PDF file' : 'Leather stock entry created',
-        fileUploaded: !!pdfFileId 
+        message: pdfFile ? 'Leather stock submission created with PDF file' : 'Leather stock submission created',
+        fileUploaded: !!pdfFileId,
+        note: 'Original submission preserved - will never be modified by stock removals'
       }, 
       { status: 201 }
     )
@@ -370,12 +652,12 @@ export async function PATCH(req) {
       )
     }
 
-    if (
-      body.quantity !== undefined &&
-      (isNaN(body.quantity) || Number(body.quantity) <= 0)
-    ) {
+    // IMPORTANT: Only allow admin to update status and metadata, NOT quantities
+    // Quantities should remain as originally submitted by workers
+    if (body.quantity !== undefined) {
+      console.warn('⚠️ Attempt to modify original quantity blocked')
       return NextResponse.json(
-        { error: 'Quantity must be a positive number' },
+        { error: 'Original quantities cannot be modified to preserve audit trail. Use stock removal system instead.' },
         { status: 400 }
       )
     }
@@ -401,18 +683,31 @@ export async function PATCH(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
+    const auditCollection = db.collection('audit_logs')
 
-    const updateData = { ...body, updatedAt: new Date() }
-    if (body.quantity !== undefined) {
-      updateData.quantity = Number(body.quantity)
+    // Get existing document for audit trail
+    const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
+    if (!existingDoc) {
+      return NextResponse.json(
+        { error: 'Stock entry not found' },
+        { status: 404 }
+      )
+    }
+
+    const updateData = { 
+      ...body, 
+      updatedAt: new Date(),
+      lastModifiedBy: 'admin',
+      lastModifiedReason: body.updateReason || 'admin_update',
+      clientIP: getClientIP(req),
+      // Ensure original submission marker is preserved
+      isOriginalSubmission: true,
+      submissionPreserved: true,
     }
 
     // Handle PDF file update
     if (pdfFile && pdfFile.size > 0) {
       try {
-        // Get existing document to delete old file if exists
-        const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
-        
         // Delete old PDF file if exists
         if (existingDoc?.pdfFile?.fileId) {
           const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
@@ -450,6 +745,23 @@ export async function PATCH(req) {
       { $set: updateData }
     )
 
+    // Create audit log
+    await auditCollection.insertOne({
+      action: 'leather_stock_updated',
+      resourceType: 'leather',
+      resourceId: id,
+      details: {
+        updatedFields: Object.keys(body),
+        originalData: existingDoc,
+        hasPdfUpdate: !!pdfFile,
+        note: 'Original quantities preserved - only status/metadata updated'
+      },
+      timestamp: new Date(),
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      success: result.modifiedCount > 0
+    })
+
     if (result.matchedCount === 0) {
       return NextResponse.json(
         { error: 'Stock entry not found' },
@@ -457,10 +769,11 @@ export async function PATCH(req) {
       )
     }
 
-    console.log('✅ Updated leather stock entry:', id)
+    console.log('✅ Updated leather stock entry (preserving original quantities):', id)
     return NextResponse.json({ 
       ...result, 
-      message: pdfFile ? 'Leather stock entry updated with new PDF file' : 'Leather stock entry updated' 
+      message: pdfFile ? 'Stock entry updated with new PDF file' : 'Stock entry updated',
+      note: 'Original quantities preserved for audit trail'
     })
   } catch (err) {
     console.error('❌ PATCH leather stock error:', err)
@@ -489,17 +802,47 @@ export async function DELETE(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('leather')
+    const auditCollection = db.collection('audit_logs')
     const bucket = new GridFSBucket(db, { bucketName: 'leatherFiles' })
 
-    // Helper function to delete associated PDF files
+    // Helper function to delete associated PDF files and create audit trail
     const deleteAssociatedFiles = async (documents) => {
       for (const doc of documents) {
         if (doc.pdfFile?.fileId) {
           try {
             await bucket.delete(new ObjectId(doc.pdfFile.fileId))
             console.log('🗑️ Deleted PDF file:', doc.pdfFile.fileName)
+            
+            // Log file deletion
+            await auditCollection.insertOne({
+              action: 'pdf_file_deleted',
+              resourceType: 'gridfs_file',
+              resourceId: doc.pdfFile.fileId,
+              details: {
+                fileName: doc.pdfFile.fileName,
+                associatedStockId: doc._id,
+                stockType: doc.type,
+                deletedDuringStockRemoval: true
+              },
+              timestamp: new Date(),
+              clientIP: getClientIP(req),
+              success: true
+            })
           } catch (fileDeleteError) {
             console.warn('⚠️ Failed to delete PDF file:', fileDeleteError)
+            await auditCollection.insertOne({
+              action: 'pdf_file_delete_failed',
+              resourceType: 'gridfs_file',
+              resourceId: doc.pdfFile.fileId,
+              details: {
+                error: fileDeleteError.message,
+                fileName: doc.pdfFile.fileName,
+                associatedStockId: doc._id
+              },
+              timestamp: new Date(),
+              clientIP: getClientIP(req),
+              success: false
+            })
           }
         }
       }
@@ -513,7 +856,7 @@ export async function DELETE(req) {
         )
       }
 
-      // Get document first to delete associated file
+      // Get document first to delete associated file and create audit trail
       const document = await collection.findOne({ _id: new ObjectId(id) })
       if (!document) {
         return NextResponse.json(
@@ -527,10 +870,32 @@ export async function DELETE(req) {
 
       const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
+      // Create comprehensive audit log
+      await auditCollection.insertOne({
+        action: 'leather_stock_deleted',
+        resourceType: 'leather',
+        resourceId: id,
+        details: {
+          deletedDocument: document,
+          stockType: document.type,
+          quantity: document.quantity,
+          company: document.company,
+          workerName: document.workerName,
+          hasPdfFile: !!document.pdfFile?.fileId,
+          wasOriginalSubmission: document.isOriginalSubmission || false,
+          deletionReason: 'Admin deletion of original worker submission'
+        },
+        timestamp: new Date(),
+        clientIP: getClientIP(req),
+        userAgent: req.headers.get('user-agent') || 'unknown',
+        success: result.deletedCount > 0
+      })
+
       console.log(`✅ Single stock entry ${id} deleted successfully`)
       return NextResponse.json({
-        message: 'Stock entry deleted successfully',
+        message: 'Original worker submission deleted successfully',
         deletedCount: result.deletedCount,
+        note: 'This was an original worker submission - consider using stock removal system instead'
       })
     }
 
@@ -556,18 +921,51 @@ export async function DELETE(req) {
         )
       }
 
-      // Get documents first to delete associated files
+      // Get documents first to delete associated files and create audit trail
       const documentsToDelete = await collection.find(query).toArray()
+      
+      if (documentsToDelete.length === 0) {
+        return NextResponse.json({
+          message: 'No matching documents found to delete',
+          deletedCount: 0,
+        })
+      }
+
       await deleteAssociatedFiles(documentsToDelete)
 
       const result = await collection.deleteMany(query)
+
+      // Create bulk audit log
+      await auditCollection.insertOne({
+        action: 'leather_stock_bulk_deleted',
+        resourceType: 'leather',
+        details: {
+          query: query,
+          deletedCount: result.deletedCount,
+          documentsDeleted: documentsToDelete.map(doc => ({
+            id: doc._id,
+            type: doc.type,
+            quantity: doc.quantity,
+            company: doc.company,
+            workerName: doc.workerName,
+            wasOriginalSubmission: doc.isOriginalSubmission || false
+          })),
+          pdfFilesDeleted: documentsToDelete.filter(doc => doc.pdfFile?.fileId).length,
+          note: 'Bulk deletion of original worker submissions'
+        },
+        timestamp: new Date(),
+        clientIP: getClientIP(req),
+        userAgent: req.headers.get('user-agent') || 'unknown',
+        success: result.deletedCount > 0
+      })
 
       console.log(
         `✅ Bulk delete completed: ${result.deletedCount} entries deleted`
       )
       return NextResponse.json({
-        message: `${result.deletedCount} stock entries deleted successfully`,
+        message: `${result.deletedCount} original worker submissions deleted successfully`,
         deletedCount: result.deletedCount,
+        note: 'These were original worker submissions - consider using stock removal system for inventory management'
       })
     }
 
@@ -593,7 +991,11 @@ export async function DELETE(req) {
 
       const result = await collection.deleteOne({ _id: new ObjectId(id) })
 
-      return NextResponse.json({ message: 'Deleted successfully', result })
+      return NextResponse.json({ 
+        message: 'Deleted successfully', 
+        result,
+        note: 'Original worker submission deleted'
+      })
     }
 
     return NextResponse.json(

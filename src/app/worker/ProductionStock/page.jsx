@@ -107,11 +107,11 @@ export default function WorkerProductionPage() {
     })
   }
 
-  // ----------------- Handle apply -----------------
+  // ✅ UPDATED: Handle apply with unlimited quantity support
   const handleApply = async (job) => {
     const input = formInputs[job._id]
 
-    // ✅ VALIDATE ALL THREE MANDATORY FIELDS
+    // ✅ UPDATED: Enhanced validation for unlimited applications
     if (!input || !input.quantity) {
       return Swal.fire('Warning', 'Please enter quantity', 'warning')
     }
@@ -128,35 +128,53 @@ export default function WorkerProductionPage() {
       return Swal.fire('Warning', 'Quantity must be greater than 0', 'warning')
     }
 
-    // Check against remaining quantity instead of original quantity
-    const availableQuantity =
-      job.remainingQuantity !== undefined ? job.remainingQuantity : job.quantity
-
-    if (Number(input.quantity) > availableQuantity) {
-      return Swal.fire(
-        'Warning',
-        `Cannot apply for more than ${availableQuantity} pieces (remaining quantity)`,
-        'warning'
-      )
+    // ✅ NEW: Add reasonable upper limit to prevent abuse
+    if (Number(input.quantity) > 50000) {
+      return Swal.fire('Warning', 'Quantity cannot exceed 50,000 pieces for practical reasons', 'warning')
     }
 
-    // ✅ SHOW CONFIRMATION DIALOG WITH ALL THREE FIELDS
+    // ✅ REMOVED: Quantity limit validation - workers can now apply for unlimited quantities
+    // ✅ NEW: Enhanced confirmation dialog for unlimited applications
+    const targetQuantity = job.quantity
+    const requestedQuantity = Number(input.quantity)
+    const exceedsTarget = requestedQuantity > targetQuantity
+    const exceedanceAmount = Math.max(0, requestedQuantity - targetQuantity)
+    const exceedancePercentage = targetQuantity > 0 ? ((exceedanceAmount / targetQuantity) * 100).toFixed(1) : 0
+
     const result = await Swal.fire({
       title: 'Confirm Application',
       html: `
-      <div class="text-left">
+      <div class="text-left space-y-2">
         <p><strong>Job:</strong> ${job.productName}</p>
-        <p><strong>Quantity:</strong> ${input.quantity} pieces</p>
-        <p><strong>Available:</strong> ${availableQuantity} pieces</p>
+        ${job.productCode ? `<p><strong>Product Code:</strong> ${job.productCode}</p>` : ''}
+        <p><strong>Your Quantity:</strong> ${input.quantity} pieces</p>
+        <p><strong>Original Target:</strong> ${targetQuantity} pieces</p>
+        ${exceedsTarget ? `
+          <div class="bg-orange-50 border-l-4 border-orange-400 p-2 my-2">
+            <p class="text-orange-800"><strong>⚠️ Exceeds Target by:</strong> ${exceedanceAmount} pieces (${exceedancePercentage}%)</p>
+            <p class="text-orange-700 text-sm mt-1">Admin will decide if they can accommodate this quantity</p>
+          </div>
+        ` : `
+          <div class="bg-green-50 border-l-4 border-green-400 p-2 my-2">
+            <p class="text-green-800">✅ Within original target range</p>
+          </div>
+        `}
         <p><strong>Company:</strong> ${input.company}</p>
         <p><strong>Note:</strong> ${input.note}</p>
+        ${job.totalMaterialCost ? `
+          <div class="bg-blue-50 border-l-4 border-blue-400 p-2 my-2">
+            <p class="text-blue-800"><strong>Est. Material Cost:</strong> ৳${(job.totalMaterialCost * requestedQuantity).toFixed(2)}</p>
+            <p class="text-blue-700 text-sm">(৳${job.totalMaterialCost.toFixed(2)} × ${requestedQuantity} units)</p>
+          </div>
+        ` : ''}
       </div>
     `,
-      icon: 'question',
+      icon: exceedsTarget ? 'question' : 'info',
       showCancelButton: true,
-      confirmButtonColor: '#92400e',
+      confirmButtonColor: exceedsTarget ? '#f59e0b' : '#92400e',
       cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Submit Application',
+      confirmButtonText: exceedsTarget ? 'Apply Anyway' : 'Submit Application',
+      width: '500px'
     })
 
     if (!result.isConfirmed) return
@@ -174,17 +192,24 @@ export default function WorkerProductionPage() {
           jobId: job._id,
           quantity: Number(input.quantity),
           note: input.note.trim(),
-          company: input.company.trim(), // ✅ SEND COMPANY FIELD
+          company: input.company.trim(),
         }),
       })
 
       const data = await res.json()
       if (res.ok) {
+        // ✅ UPDATED: Enhanced success message for unlimited applications
+        const successTitle = exceedsTarget ? 'Application Submitted!' : 'Success!'
+        const successText = exceedsTarget 
+          ? `Your application for ${input.quantity} pieces has been submitted. Since this exceeds the original target by ${exceedanceAmount} pieces, the admin will review and decide.`
+          : 'Your application has been submitted successfully'
+
         Swal.fire({
-          title: 'Success!',
-          text: 'Your application has been submitted successfully',
+          title: successTitle,
+          text: successText,
           icon: 'success',
           confirmButtonColor: '#92400e',
+          timer: exceedsTarget ? 6000 : 3000,
         })
         fetchAppliedJobs()
         fetchJobs() // Refresh jobs to get updated quantities
@@ -199,15 +224,15 @@ export default function WorkerProductionPage() {
     }
   }
 
-  // ----------------- Filter jobs based on selected filter -----------------
+  // ✅ UPDATED: Filter jobs for unlimited applications
   const getFilteredJobs = () => {
     switch (filter) {
       case 'open':
+        // ✅ UPDATED: No longer check remainingQuantity > 0 since unlimited applications are allowed
         return jobs.filter(
           (job) =>
             job.status === 'open' &&
-            !appliedJobs[job._id] &&
-            (job.remainingQuantity === undefined || job.remainingQuantity > 0)
+            !appliedJobs[job._id]
         )
       case 'applied':
         return jobs.filter((job) => appliedJobs[job._id])
@@ -238,24 +263,45 @@ export default function WorkerProductionPage() {
     )
   }
 
-  // ----------------- Get compact progress bar component -----------------
+  // ✅ UPDATED: Enhanced progress bar for unlimited applications
   const getCompactProgressBar = (job) => {
-    const totalQuantity = job.quantity
+    const targetQuantity = job.quantity
     const fulfilledQuantity = job.fulfilledQuantity || 0
-    const progressPercentage =
-      totalQuantity > 0 ? (fulfilledQuantity / totalQuantity) * 100 : 0
+    const approvedQuantity = job.approvedQuantity || fulfilledQuantity
+    
+    // ✅ NEW: Handle cases where approved quantity exceeds target
+    const progressPercentage = targetQuantity > 0 ? (fulfilledQuantity / targetQuantity) * 100 : 0
+    const approvalPercentage = targetQuantity > 0 ? (approvedQuantity / targetQuantity) * 100 : 0
+    
+    const exceededTarget = approvedQuantity > targetQuantity
 
     return (
       <div className="flex items-center gap-2 text-xs">
-        <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+        <div className="flex-1 bg-gray-200 rounded-full h-1.5 relative">
+          {/* Delivered progress */}
           <div
-            className="bg-green-500 h-1.5 rounded-full transition-all duration-300"
-            style={{ width: `${progressPercentage}%` }}
+            className="bg-green-500 h-1.5 rounded-full transition-all duration-300 absolute"
+            style={{ width: `${Math.min(progressPercentage, 100)}%` }}
           ></div>
+          {/* Approved but not delivered (if exceeds target, show as orange) */}
+          {approvalPercentage > progressPercentage && (
+            <div
+              className={`h-1.5 rounded-full transition-all duration-300 absolute ${
+                exceededTarget ? 'bg-orange-300' : 'bg-blue-300'
+              }`}
+              style={{ 
+                width: `${Math.min(approvalPercentage, 100)}%`,
+                left: `${Math.min(progressPercentage, 100)}%`
+              }}
+            ></div>
+          )}
         </div>
-        <span className="text-gray-500 min-w-0 whitespace-nowrap">
+        <span className={`min-w-0 whitespace-nowrap ${exceededTarget ? 'text-orange-600' : 'text-gray-500'}`}>
           {Math.round(progressPercentage)}%
         </span>
+        {exceededTarget && (
+          <span className="text-orange-500 text-xs">🔥</span>
+        )}
       </div>
     )
   }
@@ -324,6 +370,24 @@ export default function WorkerProductionPage() {
     setShowMaterialsModal(true)
   }
 
+  // ✅ NEW: Get quantity display info for unlimited applications
+  const getQuantityDisplayInfo = (job) => {
+    const targetQuantity = job.quantity
+    const approvedQuantity = job.approvedQuantity || job.fulfilledQuantity || 0
+    const fulfilledQuantity = job.fulfilledQuantity || 0
+    const remainingFromApproved = Math.max(0, approvedQuantity - fulfilledQuantity)
+    const exceededTarget = approvedQuantity > targetQuantity
+
+    return {
+      targetQuantity,
+      approvedQuantity,
+      fulfilledQuantity,
+      remainingFromApproved,
+      exceededTarget,
+      exceedanceAmount: Math.max(0, approvedQuantity - targetQuantity)
+    }
+  }
+
   // ----------------- Render -----------------
   const filteredJobs = getFilteredJobs()
   const totalApplications = Object.keys(appliedJobs).length
@@ -354,9 +418,15 @@ export default function WorkerProductionPage() {
             {pendingApplications}
           </div>
         </div>
+        {/* ✅ NEW: Unlimited applications notice */}
+        <div className="mt-2 text-center">
+          <span className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-xs font-medium">
+            🔥 Unlimited Applications Enabled - Apply for any quantity!
+          </span>
+        </div>
       </div>
 
-      {/* Filter Tabs */}
+      {/* ✅ UPDATED: Filter Tabs with updated counts */}
       <div className="flex justify-center mb-6">
         <div className="bg-white rounded-xl p-1 shadow-lg border border-amber-200">
           <button
@@ -382,9 +452,7 @@ export default function WorkerProductionPage() {
               jobs.filter(
                 (job) =>
                   job.status === 'open' &&
-                  !appliedJobs[job._id] &&
-                  (job.remainingQuantity === undefined ||
-                    job.remainingQuantity > 0)
+                  !appliedJobs[job._id]
               ).length
             }
             )
@@ -425,11 +493,7 @@ export default function WorkerProductionPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredJobs.map((job) => {
-            const remainingQuantity =
-              job.remainingQuantity !== undefined
-                ? job.remainingQuantity
-                : job.quantity
-            const fulfilledQuantity = job.fulfilledQuantity || 0
+            const quantityInfo = getQuantityDisplayInfo(job)
             const hasValidImage =
               job.image && job.image.trim() !== '' && !imageLoadErrors[job._id]
 
@@ -456,19 +520,19 @@ export default function WorkerProductionPage() {
                       {appliedJobs[job._id] &&
                         getApplicationStatusBadge(job._id)}
                     </div>
-                    <div className="absolute top-1 left-1">
-                      {job.status === 'open' &&
-                        remainingQuantity !== undefined && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded-full text-xs font-semibold ${
-                              remainingQuantity > 0
-                                ? 'bg-green-500 text-white'
-                                : 'bg-red-500 text-white'
-                            }`}
-                          >
-                            {remainingQuantity} left
-                          </span>
-                        )}
+                    <div className="absolute top-1 left-1 flex flex-col gap-1">
+                      {/* ✅ UPDATED: Target quantity badge */}
+                      {job.status === 'open' && (
+                        <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded-full text-xs font-semibold">
+                          Target: {quantityInfo.targetQuantity}
+                        </span>
+                      )}
+                      {/* ✅ NEW: Exceeded target badge */}
+                      {quantityInfo.exceededTarget && (
+                        <span className="bg-orange-500 text-white px-1.5 py-0.5 rounded-full text-xs font-semibold">
+                          🔥 +{quantityInfo.exceedanceAmount}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -484,6 +548,12 @@ export default function WorkerProductionPage() {
                       <p className="text-amber-700 text-xs font-medium truncate px-2">
                         {job.productName}
                       </p>
+                      {/* ✅ NEW: Product code display */}
+                      {job.productCode && (
+                        <p className="text-blue-600 text-xs font-medium truncate px-2">
+                          {job.productCode}
+                        </p>
+                      )}
                     </div>
 
                     {/* Badges */}
@@ -491,19 +561,19 @@ export default function WorkerProductionPage() {
                       {appliedJobs[job._id] &&
                         getApplicationStatusBadge(job._id)}
                     </div>
-                    <div className="absolute top-1 left-1">
-                      {job.status === 'open' &&
-                        remainingQuantity !== undefined && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded-full text-xs font-semibold ${
-                              remainingQuantity > 0
-                                ? 'bg-green-500 text-white'
-                                : 'bg-red-500 text-white'
-                            }`}
-                          >
-                            {remainingQuantity} left
-                          </span>
-                        )}
+                    <div className="absolute top-1 left-1 flex flex-col gap-1">
+                      {/* ✅ UPDATED: Target quantity badge */}
+                      {job.status === 'open' && (
+                        <span className="bg-blue-500 text-white px-1.5 py-0.5 rounded-full text-xs font-semibold">
+                          Target: {quantityInfo.targetQuantity}
+                        </span>
+                      )}
+                      {/* ✅ NEW: Exceeded target badge */}
+                      {quantityInfo.exceededTarget && (
+                        <span className="bg-orange-500 text-white px-1.5 py-0.5 rounded-full text-xs font-semibold">
+                          🔥 +{quantityInfo.exceedanceAmount}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -511,9 +581,17 @@ export default function WorkerProductionPage() {
                 <div className="p-3">
                   {/* Job Info Header with PDF Download Button */}
                   <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-bold text-amber-900 text-sm truncate flex-1">
-                      {job.productName}
-                    </h3>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-amber-900 text-sm truncate">
+                        {job.productName}
+                      </h3>
+                      {/* ✅ NEW: Product code display */}
+                      {job.productCode && (
+                        <p className="text-blue-600 text-xs font-medium truncate">
+                          Code: {job.productCode}
+                        </p>
+                      )}
+                    </div>
                     {/* PDF Download Button */}
                     {job.pdfFile?.fileId && (
                       <button
@@ -522,7 +600,7 @@ export default function WorkerProductionPage() {
                         title="Download PDF"
                       >
                         <div className='flex gap-2 items-center'>
-                          <p className='text-[12px]'>PDF DOWNLOAD</p>
+                          <p className='text-[12px]'>PDF</p>
                           <svg
                           className="w-4 h-4"
                           fill="currentColor"
@@ -543,7 +621,7 @@ export default function WorkerProductionPage() {
                     {job.description || 'No description available'}
                   </p>
 
-                  {/* 🆕 NEW: Materials Display */}
+                  {/* Materials Display */}
                   <MaterialsDisplay
                     materials={job.materials}
                     totalMaterialCost={job.totalMaterialCost}
@@ -559,31 +637,44 @@ export default function WorkerProductionPage() {
                     </button>
                   )}
 
-                  {/* Compact Quantity Grid */}
+                  {/* ✅ UPDATED: Enhanced Quantity Grid for Unlimited Applications */}
                   <div className="bg-gray-50 rounded-lg p-2 mb-2">
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-3 gap-2 text-xs">
                       <div className="text-center">
-                        <span className="text-gray-500 block">Total</span>
-                        <span className="font-bold text-gray-900">
-                          {job.quantity}
+                        <span className="text-gray-500 block">Target</span>
+                        <span className="font-bold text-blue-600">
+                          {quantityInfo.targetQuantity}
                         </span>
                       </div>
                       <div className="text-center">
-                        <span className="text-gray-500 block">Left</span>
-                        <span
-                          className={`font-bold ${
-                            remainingQuantity > 0
-                              ? 'text-green-600'
-                              : 'text-red-600'
-                          }`}
-                        >
-                          {remainingQuantity}
+                        <span className="text-gray-500 block">Approved</span>
+                        <span className={`font-bold ${
+                          quantityInfo.exceededTarget 
+                            ? 'text-orange-600' 
+                            : 'text-green-600'
+                        }`}>
+                          {quantityInfo.approvedQuantity}
+                        </span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-gray-500 block">Done</span>
+                        <span className="font-bold text-purple-600">
+                          {quantityInfo.fulfilledQuantity}
                         </span>
                       </div>
                     </div>
 
-                    {/* Compact Progress Bar */}
+                    {/* Enhanced Progress Bar */}
                     <div className="mt-2">{getCompactProgressBar(job)}</div>
+                    
+                    {/* ✅ NEW: Exceeded target indicator */}
+                    {quantityInfo.exceededTarget && (
+                      <div className="mt-1 text-center">
+                        <span className="text-orange-600 text-xs font-medium">
+                          🔥 Exceeded by {quantityInfo.exceedanceAmount}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Status and Date */}
@@ -604,92 +695,85 @@ export default function WorkerProductionPage() {
                     </span>
                   </div>
 
-                  {/* Application Form */}
-                  {job.status === 'open' &&
-                    !appliedJobs[job._id] &&
-                    remainingQuantity > 0 && (
-                      <div className="border-t border-amber-200 pt-2 space-y-2">
-                        {/* 🆕 NEW: Cost Calculator for Application */}
-                        {job.totalMaterialCost && (
-                          <div className="bg-green-50 rounded p-2 text-xs">
-                            <div className="flex justify-between items-center">
-                              <span className="text-green-700">
-                                Est. material cost:
-                              </span>
-                              <span className="font-semibold text-green-800">
-                                ৳
-                                {(
-                                  job.totalMaterialCost *
-                                  (Number(formInputs[job._id]?.quantity) || 1)
-                                ).toFixed(2)}
-                              </span>
-                            </div>
-                            <div className="text-green-600 text-xs mt-1">
-                              ({job.totalMaterialCost.toFixed(2)} ×{' '}
-                              {formInputs[job._id]?.quantity || 1} units)
-                            </div>
+                  {/* ✅ UPDATED: Application Form for Unlimited Applications */}
+                  {job.status === 'open' && !appliedJobs[job._id] && (
+                    <div className="border-t border-amber-200 pt-2 space-y-2">
+                      {/* ✅ UPDATED: Enhanced cost calculator */}
+                      {job.totalMaterialCost && (
+                        <div className="bg-green-50 rounded p-2 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-green-700">
+                              Est. material cost:
+                            </span>
+                            <span className="font-semibold text-green-800">
+                              ৳
+                              {(
+                                job.totalMaterialCost *
+                                (Number(formInputs[job._id]?.quantity) || 1)
+                              ).toFixed(2)}
+                            </span>
                           </div>
-                        )}
+                          <div className="text-green-600 text-xs mt-1">
+                            ({job.totalMaterialCost.toFixed(2)} ×{' '}
+                            {formInputs[job._id]?.quantity || 1} units)
+                          </div>
+                        </div>
+                      )}
 
-                        {/* Quantity Input */}
+                      {/* ✅ UPDATED: Quantity Input with unlimited support */}
+                      <div className="relative">
                         <input
                           type="number"
                           name="quantity"
                           value={formInputs[job._id]?.quantity || ''}
                           onChange={(e) => handleChange(job._id, e)}
-                          placeholder={`Max ${remainingQuantity}`}
+                          placeholder="Enter any quantity (e.g., 1000)"
                           className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
                           min="1"
-                          max={remainingQuantity}
+                          max="50000" // Reasonable upper limit
                           required
                         />
-
-                        {/* Company Input */}
-                        <input
-                          type="text"
-                          name="company"
-                          value={formInputs[job._id]?.company || ''}
-                          onChange={(e) => handleChange(job._id, e)}
-                          placeholder="Enter your company name *"
-                          className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
-                          required
-                        />
-
-                        {/* Note Input */}
-                        <textarea
-                          name="note"
-                          value={formInputs[job._id]?.note || ''}
-                          onChange={(e) => handleChange(job._id, e)}
-                          rows={2}
-                          placeholder="Enter your note *"
-                          className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs resize-none"
-                          required
-                        />
-
-                        <button
-                          onClick={() => handleApply(job)}
-                          disabled={loading}
-                          className="w-full bg-amber-900 text-white font-semibold py-2 px-3 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 disabled:cursor-not-allowed text-xs"
-                        >
-                          {loading ? 'Applying...' : 'Apply'}
-                        </button>
+                        {/* ✅ NEW: Quantity guidance */}
+                        {formInputs[job._id]?.quantity && Number(formInputs[job._id]?.quantity) > quantityInfo.targetQuantity && (
+                          <div className="mt-1 text-orange-600 text-xs">
+                            ⚠️ Exceeds target by {Number(formInputs[job._id]?.quantity) - quantityInfo.targetQuantity}
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                  {/* No Remaining Quantity */}
-                  {job.status === 'open' &&
-                    !appliedJobs[job._id] &&
-                    remainingQuantity <= 0 && (
-                      <div className="border-t border-amber-200 pt-2">
-                        <div className="bg-red-50 rounded-lg p-2 text-center">
-                          <p className="text-red-600 text-xs font-semibold">
-                            Fully allocated
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                      {/* Company Input */}
+                      <input
+                        type="text"
+                        name="company"
+                        value={formInputs[job._id]?.company || ''}
+                        onChange={(e) => handleChange(job._id, e)}
+                        placeholder="Enter your company name *"
+                        className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
+                        required
+                      />
 
-                  {/* Applied Status */}
+                      {/* Note Input */}
+                      <textarea
+                        name="note"
+                        value={formInputs[job._id]?.note || ''}
+                        onChange={(e) => handleChange(job._id, e)}
+                        rows={2}
+                        placeholder="Enter your note (required) *"
+                        className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs resize-none"
+                        required
+                      />
+
+                      <button
+                        onClick={() => handleApply(job)}
+                        disabled={loading}
+                        className="w-full bg-amber-900 text-white font-semibold py-2 px-3 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+                      >
+                        {loading ? 'Applying...' : 'Apply (Unlimited)'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ✅ UPDATED: Applied Status with enhanced info */}
                   {appliedJobs[job._id] && (
                     <div className="border-t border-amber-200 pt-2">
                       <div className="bg-amber-50 rounded-lg p-2">
@@ -701,6 +785,10 @@ export default function WorkerProductionPage() {
                             <span className="text-gray-600">Quantity:</span>
                             <span className="font-semibold text-amber-900">
                               {appliedJobs[job._id].quantity}
+                              {/* ✅ NEW: Show if application exceeded target */}
+                              {appliedJobs[job._id].exceedsOriginalTarget && (
+                                <span className="text-orange-600 ml-1">🔥</span>
+                              )}
                             </span>
                           </div>
                           {/* Show Company */}
@@ -710,7 +798,7 @@ export default function WorkerProductionPage() {
                               {appliedJobs[job._id].workerCompany || 'N/A'}
                             </span>
                           </div>
-                          {/* 🆕 NEW: Show estimated material cost for applied quantity */}
+                          {/* Show estimated material cost for applied quantity */}
                           {job.totalMaterialCost && (
                             <div className="flex justify-between">
                               <span className="text-gray-600">
@@ -722,6 +810,15 @@ export default function WorkerProductionPage() {
                                   job.totalMaterialCost *
                                   appliedJobs[job._id].quantity
                                 ).toFixed(2)}
+                              </span>
+                            </div>
+                          )}
+                          {/* ✅ NEW: Show target comparison */}
+                          {appliedJobs[job._id].exceedsOriginalTarget && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Exceeds by:</span>
+                              <span className="font-semibold text-orange-600">
+                                +{appliedJobs[job._id].exceedanceAmount || 0}
                               </span>
                             </div>
                           )}
@@ -757,7 +854,7 @@ export default function WorkerProductionPage() {
         </div>
       )}
 
-      {/* 🆕 NEW: Detailed Materials Modal */}
+      {/* Materials Modal - Keep existing */}
       {showMaterialsModal && selectedJobMaterials && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden">
@@ -768,6 +865,12 @@ export default function WorkerProductionPage() {
                   <h2 className="text-lg font-bold text-blue-900">
                     Materials for {selectedJobMaterials.productName}
                   </h2>
+                  {/* ✅ NEW: Show product code in modal */}
+                  {selectedJobMaterials.productCode && (
+                    <p className="text-blue-600 text-sm font-medium">
+                      Code: {selectedJobMaterials.productCode}
+                    </p>
+                  )}
                   <p className="text-blue-700 text-sm">
                     Cost breakdown per unit
                   </p>
@@ -830,28 +933,35 @@ export default function WorkerProductionPage() {
                     </div>
                   </div>
 
-                  {/* Cost Calculator */}
+                  {/* ✅ UPDATED: Enhanced Cost Calculator for Unlimited Applications */}
                   <div className="bg-green-50 rounded-lg p-3 border border-green-200">
                     <h4 className="font-semibold text-green-900 mb-2">
-                      Cost Calculator
+                      Cost Calculator (Unlimited)
                     </h4>
-                    <div className="text-sm text-green-800">
-                      <p>If you produce 10 units:</p>
-                      <p className="font-bold">
-                        ৳
-                        {(selectedJobMaterials.totalMaterialCost * 10).toFixed(
-                          2
-                        )}{' '}
-                        in materials
-                      </p>
-                      <p className="mt-2">If you produce 50 units:</p>
-                      <p className="font-bold">
-                        ৳
-                        {(selectedJobMaterials.totalMaterialCost * 50).toFixed(
-                          2
-                        )}{' '}
-                        in materials
-                      </p>
+                    <div className="text-sm text-green-800 space-y-2">
+                      <div>
+                        <p>If you produce 100 units:</p>
+                        <p className="font-bold">
+                          ৳{(selectedJobMaterials.totalMaterialCost * 100).toFixed(2)} in materials
+                        </p>
+                      </div>
+                      <div>
+                        <p>If you produce 500 units:</p>
+                        <p className="font-bold">
+                          ৳{(selectedJobMaterials.totalMaterialCost * 500).toFixed(2)} in materials
+                        </p>
+                      </div>
+                      <div>
+                        <p>If you produce 1000 units:</p>
+                        <p className="font-bold">
+                          ৳{(selectedJobMaterials.totalMaterialCost * 1000).toFixed(2)} in materials
+                        </p>
+                      </div>
+                      <div className="border-t border-green-300 pt-2 mt-2">
+                        <p className="text-green-700 text-xs">
+                          💡 You can apply for any quantity - admin will decide based on capacity and materials availability!
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>

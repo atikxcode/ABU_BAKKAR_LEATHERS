@@ -11,6 +11,14 @@ const isAdmin = (req) => {
   return role === 'admin'
 }
 
+// Helper function to get client IP for audit trail
+const getClientIP = (req) => {
+  const forwarded = req.headers.get('x-forwarded-for')
+  const realIP = req.headers.get('x-real-ip')
+  const clientIP = forwarded ? forwarded.split(',')[0] : realIP
+  return clientIP || 'unknown'
+}
+
 const deleteImageFromImgbb = async (imageUrl) => {
   try {
     const urlParts = imageUrl.split('/')
@@ -73,6 +81,67 @@ const uploadPdfToGridFS = async (db, file, filename) => {
   }
 }
 
+// ✅ UPDATED: Enhanced function to calculate net available finished product quantities with product code support
+const calculateNetAvailableFinishedProducts = async (db) => {
+  console.log('🔍 Calculating net available finished products...')
+  
+  const finishedProductsCollection = db.collection('finished_products')
+  // ✅ UPDATED: Use unified stock_removal_logs for consistency
+  const stockRemovalLogCollection = db.collection('stock_removal_logs')
+  
+  // Get all finished products
+  const finishedProducts = await finishedProductsCollection.find({}).toArray()
+  
+  // ✅ UPDATED: Get all completed product removals from unified collection
+  const allRemovals = await stockRemovalLogCollection
+    .find({ 
+      status: 'completed',
+      category: 'finished_product' // ✅ Filter by category for finished products
+    })
+    .toArray()
+  
+  // Calculate net quantities by product ID
+  const productQuantities = {}
+  
+  // First, add all finished product quantities
+  finishedProducts.forEach(product => {
+    productQuantities[product._id.toString()] = {
+      productId: product._id,
+      productName: product.productName,
+      productCode: product.productCode || null, // ✅ NEW: Include product code
+      originalFulfilledQuantity: product.fulfilledQuantity || 0,
+      totalRemoved: 0,
+      currentAvailableQuantity: product.fulfilledQuantity || 0,
+      finishedAt: product.finishedAt,
+      // Preserve original product data
+      originalProduct: product
+    }
+  })
+  
+  // ✅ UPDATED: Process removals from unified collection
+  allRemovals.forEach(removal => {
+    const productId = removal.stockType || removal.productId // Support both field names
+    if (productQuantities[productId]) {
+      productQuantities[productId].totalRemoved += removal.actualRemovedQuantity || removal.removeQuantity || 0
+    }
+  })
+  
+  // Calculate current available quantities
+  Object.keys(productQuantities).forEach(productId => {
+    const product = productQuantities[productId]
+    product.currentAvailableQuantity = Math.max(0, product.originalFulfilledQuantity - product.totalRemoved)
+    
+    // Add percentage moved/sold
+    product.percentageMoved = product.originalFulfilledQuantity > 0 
+      ? ((product.totalRemoved / product.originalFulfilledQuantity) * 100).toFixed(2)
+      : 0
+  })
+  
+  console.log('📊 Net finished product quantities calculated:', Object.keys(productQuantities).length, 'products')
+  return productQuantities
+}
+
+// ✅ UPDATED: Enhanced validation function with product code support
 const validateAndFormatMaterials = (materials) => {
   if (!materials || !Array.isArray(materials)) {
     return []
@@ -87,6 +156,26 @@ const validateAndFormatMaterials = (materials) => {
     }))
 }
 
+// ✅ NEW: Function to validate and format product code
+const validateProductCode = (productCode) => {
+  if (!productCode || typeof productCode !== 'string') {
+    return null
+  }
+  
+  const trimmed = productCode.trim()
+  if (trimmed === '') {
+    return null
+  }
+  
+  // Optional: Add product code format validation (e.g., PD-001, WL-100)
+  const codePattern = /^[A-Z]{2}-\d{3}$/i
+  if (!codePattern.test(trimmed)) {
+    console.warn('⚠️ Product code format warning:', trimmed, 'Expected format: XX-000')
+  }
+  
+  return trimmed.toUpperCase() // Standardize to uppercase
+}
+
 export async function GET(req) {
   console.log('🔍 GET /api/stock/production - Starting')
 
@@ -94,6 +183,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url)
     const downloadFile = searchParams.get('downloadFile')
     const fileId = searchParams.get('fileId')
+    const getNetQuantities = searchParams.get('getNetQuantities') // NEW: Get net quantities
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
@@ -149,6 +239,12 @@ export async function GET(req) {
     const items = await productionCollection.find().toArray()
     console.log(`📦 Found ${items.length} production jobs`)
 
+    // NEW: Get net quantities for finished products if requested
+    let netFinishedProductQuantities = {}
+    if (getNetQuantities === 'true') {
+      netFinishedProductQuantities = await calculateNetAvailableFinishedProducts(db)
+    }
+
     const itemsWithApplications = await Promise.all(
       items.map(async (item) => {
         const applicationCount = await applyCollection.countDocuments({
@@ -168,7 +264,8 @@ export async function GET(req) {
         )
         const remainingQuantity = Math.max(0, item.quantity - approvedQuantity)
 
-        return {
+        // ✅ UPDATED: Enhanced item with product code and finished product net quantities
+        const enhancedItem = {
           ...item,
           applicationCount,
           approvedQuantity,
@@ -180,9 +277,76 @@ export async function GET(req) {
             item.fulfilledQuantity !== undefined
               ? item.fulfilledQuantity
               : approvedQuantity,
+          // ✅ NEW: Ensure product code is included
+          productCode: item.productCode || null,
         }
+
+        // ✅ UPDATED: Add net quantity info with product code matching
+        if (getNetQuantities === 'true') {
+          const relatedFinishedProducts = Object.values(netFinishedProductQuantities)
+            .filter(fp => {
+              // Match by product name and optionally by product code
+              const nameMatch = fp.originalProduct.productName === item.productName
+              const codeMatch = item.productCode && fp.productCode 
+                ? fp.productCode === item.productCode 
+                : true // If no codes, just match by name
+              return nameMatch && codeMatch
+            })
+
+          if (relatedFinishedProducts.length > 0) {
+            const totalOriginalProduced = relatedFinishedProducts.reduce(
+              (sum, fp) => sum + fp.originalFulfilledQuantity, 0
+            )
+            const totalCurrentAvailable = relatedFinishedProducts.reduce(
+              (sum, fp) => sum + fp.currentAvailableQuantity, 0
+            )
+            const totalRemoved = relatedFinishedProducts.reduce(
+              (sum, fp) => sum + fp.totalRemoved, 0
+            )
+
+            enhancedItem.finishedProductsSummary = {
+              totalOriginalProduced,
+              totalCurrentAvailable,
+              totalRemoved,
+              relatedProductsCount: relatedFinishedProducts.length,
+              inventoryTurnoverRate: totalOriginalProduced > 0 
+                ? ((totalRemoved / totalOriginalProduced) * 100).toFixed(2)
+                : 0,
+              // ✅ NEW: Include product code info
+              matchedByProductCode: item.productCode && relatedFinishedProducts.some(fp => fp.productCode === item.productCode)
+            }
+          }
+        }
+
+        return enhancedItem
       })
     )
+
+    // ✅ UPDATED: Enhanced response with product code statistics
+    if (getNetQuantities === 'true') {
+      const responseData = {
+        items: itemsWithApplications,
+        netFinishedProductQuantities,
+        statistics: {
+          totalProductionJobs: itemsWithApplications.length,
+          totalFinishedProducts: Object.keys(netFinishedProductQuantities).length,
+          totalOriginalProduced: Object.values(netFinishedProductQuantities)
+            .reduce((sum, fp) => sum + fp.originalFulfilledQuantity, 0),
+          totalCurrentAvailable: Object.values(netFinishedProductQuantities)
+            .reduce((sum, fp) => sum + fp.currentAvailableQuantity, 0),
+          totalRemoved: Object.values(netFinishedProductQuantities)
+            .reduce((sum, fp) => sum + fp.totalRemoved, 0),
+          // ✅ NEW: Product code statistics
+          jobsWithProductCode: itemsWithApplications.filter(item => item.productCode).length,
+          uniqueProductCodes: [...new Set(itemsWithApplications.map(item => item.productCode).filter(Boolean))].length,
+        },
+        generatedAt: new Date(),
+        dataIntegrityNote: "Original production and finished product records are preserved. Net quantities calculated separately. Product codes tracked for enhanced inventory management."
+      }
+
+      console.log('✅ GET /api/stock/production with net quantities - Success')
+      return NextResponse.json(responseData)
+    }
 
     console.log('✅ GET /api/stock/production - Success')
     return NextResponse.json(itemsWithApplications)
@@ -226,6 +390,7 @@ export async function POST(req) {
 
     console.log('📝 Received body:', {
       productName: body.productName,
+      productCode: body.productCode, // ✅ NEW: Log product code
       quantity: body.quantity,
       description: body.description?.substring(0, 50),
       hasImage: !!body.image,
@@ -233,11 +398,24 @@ export async function POST(req) {
       materialsCount: body.materials?.length || 0,
     })
 
+    // ✅ UPDATED: Enhanced validation with product code
     if (!body.productName || !body.quantity) {
       console.error('❌ Missing required fields')
       return NextResponse.json(
         {
           error: 'Product name and quantity are required',
+        },
+        { status: 400 }
+      )
+    }
+
+    // ✅ NEW: Validate product code if provided
+    const validatedProductCode = validateProductCode(body.productCode)
+    if (body.productCode && !validatedProductCode) {
+      console.error('❌ Invalid product code format')
+      return NextResponse.json(
+        {
+          error: 'Product code must be a non-empty string (recommended format: XX-000)',
         },
         { status: 400 }
       )
@@ -276,6 +454,7 @@ export async function POST(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production')
+    const auditCollection = db.collection('audit_logs') // NEW: Audit logging
     console.log('✅ MongoDB connected successfully')
 
     let imageUrl = null
@@ -321,7 +500,7 @@ export async function POST(req) {
     let pdfFileId = null
     let pdfFileName = null
 
-    // Handle PDF upload (new functionality)
+    // Handle PDF upload
     if (pdfFile && pdfFile.size > 0) {
       try {
         const timestamp = Date.now()
@@ -347,8 +526,10 @@ export async function POST(req) {
 
     console.log('💾 Inserting document to MongoDB...')
 
+    // ✅ UPDATED: Enhanced production job document with product code
     const document = {
       productName: body.productName,
+      productCode: validatedProductCode, // ✅ NEW: Add product code field
       description: body.description || '',
       quantity: Number(body.quantity),
       remainingQuantity: Number(body.quantity),
@@ -360,6 +541,22 @@ export async function POST(req) {
       imageDeleteUrl: deleteUrl,
       date: new Date(),
       status: body.status || 'pending',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      
+      // NEW: Audit trail metadata
+      createdBy: 'admin',
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      
+      // ✅ UPDATED: Enhanced tracking with product code support
+      originalQuantityPreserved: true,
+      productionStage: 'planning',
+      inventoryTracking: {
+        enableNetQuantityTracking: true,
+        preserveOriginalRecords: true,
+        productCodeTracking: !!validatedProductCode // Track if product code is used
+      }
     }
 
     // Add PDF information if uploaded
@@ -373,6 +570,26 @@ export async function POST(req) {
 
     const result = await collection.insertOne(document)
 
+    // ✅ UPDATED: Enhanced audit log with product code
+    await auditCollection.insertOne({
+      action: 'production_job_created',
+      resourceType: 'production',
+      resourceId: result.insertedId,
+      details: {
+        productName: body.productName,
+        productCode: validatedProductCode, // ✅ NEW: Include product code in audit
+        quantity: Number(body.quantity),
+        materialsCost: totalMaterialCost,
+        hasPdfFile: !!pdfFileId,
+        hasImage: !!imageUrl,
+        note: 'Production job created with enhanced tracking and product code support'
+      },
+      timestamp: new Date(),
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      success: true
+    })
+
     console.log('✅ Document inserted successfully:', result.insertedId)
     console.log('✅ POST /api/stock/production - Success')
 
@@ -382,6 +599,8 @@ export async function POST(req) {
         insertedId: result.insertedId,
         message: pdfFile ? 'Production job created with PDF file' : 'Production job created',
         fileUploaded: !!pdfFileId,
+        productCode: validatedProductCode, // ✅ NEW: Return validated product code
+        note: 'Enhanced with finished product tracking and product code support'
       },
       { status: 201 }
     )
@@ -431,7 +650,12 @@ export async function PATCH(req) {
       body = await req.json()
     }
 
-    console.log('🔄 PATCH request:', { id, body: { ...body, hasPdf: !!pdfFile } })
+    console.log('🔄 PATCH request:', { 
+      id, 
+      productName: body.productName,
+      productCode: body.productCode, // ✅ NEW: Log product code updates
+      hasPdf: !!pdfFile 
+    })
 
     if (!id) {
       console.error('❌ Missing ID parameter')
@@ -441,6 +665,21 @@ export async function PATCH(req) {
     if (!ObjectId.isValid(id)) {
       console.error('❌ Invalid ObjectId:', id)
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
+    }
+
+    // ✅ NEW: Validate product code if being updated
+    if (body.productCode !== undefined) {
+      const validatedProductCode = validateProductCode(body.productCode)
+      if (body.productCode && !validatedProductCode) {
+        console.error('❌ Invalid product code format')
+        return NextResponse.json(
+          {
+            error: 'Product code must be a non-empty string (recommended format: XX-000)',
+          },
+          { status: 400 }
+        )
+      }
+      body.productCode = validatedProductCode // Use validated version
     }
 
     // PDF file validation
@@ -464,13 +703,20 @@ export async function PATCH(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production')
+    const auditCollection = db.collection('audit_logs') // NEW: Audit logging
+
+    // Get existing document for audit trail
+    const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
+    if (!existingDoc) {
+      return NextResponse.json(
+        { error: 'Production job not found' },
+        { status: 404 }
+      )
+    }
 
     // Handle PDF file update
     if (pdfFile && pdfFile.size > 0) {
       try {
-        // Get existing document to delete old file if exists
-        const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
-        
         // Delete old PDF file if exists
         if (existingDoc?.pdfFile?.fileId) {
           const bucket = new GridFSBucket(db, { bucketName: 'productionFiles' })
@@ -514,26 +760,55 @@ export async function PATCH(req) {
     }
 
     if (body.quantity !== undefined) {
-      const currentJob = await collection.findOne({ _id: new ObjectId(id) })
-      if (currentJob) {
-        const fulfilledQuantity = currentJob.fulfilledQuantity || 0
-        body.remainingQuantity = Math.max(
-          0,
-          Number(body.quantity) - fulfilledQuantity
-        )
-        console.log('🔄 Updated remaining quantity:', body.remainingQuantity)
-      }
+      const fulfilledQuantity = existingDoc.fulfilledQuantity || 0
+      body.remainingQuantity = Math.max(
+        0,
+        Number(body.quantity) - fulfilledQuantity
+      )
+      console.log('🔄 Updated remaining quantity:', body.remainingQuantity)
+    }
+
+    // ✅ UPDATED: Enhanced update data with product code audit trail
+    const updateData = {
+      ...body, 
+      updatedAt: new Date(),
+      lastModifiedBy: 'admin',
+      lastModifiedReason: body.updateReason || 'production_job_update',
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
     }
 
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: { ...body, updatedAt: new Date() } }
+      { $set: updateData }
     )
+
+    // ✅ UPDATED: Enhanced audit log with product code changes
+    await auditCollection.insertOne({
+      action: 'production_job_updated',
+      resourceType: 'production',
+      resourceId: id,
+      details: {
+        updatedFields: Object.keys(body),
+        originalData: existingDoc,
+        hasPdfUpdate: !!pdfFile,
+        productCodeChanged: body.productCode !== undefined && body.productCode !== existingDoc.productCode,
+        oldProductCode: existingDoc.productCode,
+        newProductCode: body.productCode,
+        note: 'Production job updated with enhanced tracking and product code support'
+      },
+      timestamp: new Date(),
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      success: result.modifiedCount > 0
+    })
 
     console.log('✅ PATCH /api/stock/production - Success')
     return NextResponse.json({ 
       ...result, 
-      message: pdfFile ? 'Production job updated with new PDF file' : 'Production job updated' 
+      message: pdfFile ? 'Production job updated with new PDF file' : 'Production job updated',
+      productCode: body.productCode, // ✅ NEW: Return updated product code
+      note: 'Enhanced tracking and product code support preserved'
     })
   } catch (err) {
     console.error('❌ PATCH /api/stock/production error:', err)
@@ -568,6 +843,7 @@ export async function DELETE(req) {
     const db = client.db('AbuBakkarLeathers')
     const productionCollection = db.collection('production')
     const applyCollection = db.collection('production_apply')
+    const auditCollection = db.collection('audit_logs') // NEW: Audit logging
 
     const job = await productionCollection.findOne({ _id: new ObjectId(id) })
 
@@ -576,7 +852,7 @@ export async function DELETE(req) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
 
-    console.log('📋 Found job to delete:', job.productName)
+    console.log('📋 Found job to delete:', job.productName, 'Code:', job.productCode)
 
     let imageDeleted = false
     let pdfDeleted = false
@@ -617,13 +893,36 @@ export async function DELETE(req) {
       _id: new ObjectId(id),
     })
 
+    // ✅ UPDATED: Enhanced audit log with product code information
+    await auditCollection.insertOne({
+      action: 'production_job_deleted',
+      resourceType: 'production',
+      resourceId: id,
+      details: {
+        deletedJob: job,
+        productName: job.productName,
+        productCode: job.productCode, // ✅ NEW: Include product code in audit
+        quantity: job.quantity,
+        applicationsDeleted: applicationsDeleteResult.deletedCount,
+        imageDeleted: imageDeleted,
+        pdfDeleted: pdfDeleted,
+        note: 'Complete production job deletion with cleanup and product code tracking'
+      },
+      timestamp: new Date(),
+      clientIP: getClientIP(req),
+      userAgent: req.headers.get('user-agent') || 'unknown',
+      success: jobDeleteResult.deletedCount > 0
+    })
+
     console.log('✅ DELETE /api/stock/production - Success')
     return NextResponse.json({
-      message: 'Job and related data deleted successfully',
+      message: 'Production job and related data deleted successfully',
       jobDeleted: jobDeleteResult.deletedCount > 0,
       applicationsDeleted: applicationsDeleteResult.deletedCount,
       imageDeleted: imageDeleted,
       pdfDeleted: pdfDeleted,
+      productCode: job.productCode, // ✅ NEW: Return deleted product code
+      note: 'Enhanced audit trail with product code tracking preserved'
     })
   } catch (err) {
     console.error('❌ DELETE /api/stock/production error:', err)

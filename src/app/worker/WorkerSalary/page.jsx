@@ -14,7 +14,11 @@ import {
   FaUsers,
   FaHardHat,
   FaCalendarAlt,
-  FaEye
+  FaEye,
+  FaCreditCard,
+  FaHistory,
+  FaPercentage,
+  FaChartLine
 } from 'react-icons/fa'
 
 export default function WorkerSalaryPage() {
@@ -30,11 +34,21 @@ export default function WorkerSalaryPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
   const [activeTab, setActiveTab] = useState('salary') // 'salary' or 'labor'
+  
+  // ✅ NEW: Advance payment states
+  const [showAdvanceHistory, setShowAdvanceHistory] = useState(false)
+  const [selectedAdvanceHistory, setSelectedAdvanceHistory] = useState(null)
+  
+  // ✅ NEW: Enhanced stats with advance payment tracking
   const [stats, setStats] = useState({
     totalSalary: 0,
     totalLaborSalary: 0,
     totalEarnings: 0,
-    pendingAmount: 0
+    pendingAmount: 0,
+    totalAdvancesReceived: 0,
+    pendingBalances: 0,
+    fullyPaidSalaries: 0,
+    partialPaidSalaries: 0
   })
 
   const {
@@ -51,7 +65,7 @@ export default function WorkerSalaryPage() {
     }
   })
 
-  // Fetch my worker salary records
+  // ✅ UPDATED: Enhanced fetch my salaries with advance payment data
   const fetchMySalaries = async () => {
     if (!userEmail) return
 
@@ -72,6 +86,7 @@ export default function WorkerSalaryPage() {
       const res = await fetch(`/api/salary?${params}`)
       if (res.ok) {
         const data = await res.json()
+        console.log('📊 Worker salaries with advance data:', data)
         setMySalaries(data)
       }
     } catch (error) {
@@ -90,7 +105,7 @@ export default function WorkerSalaryPage() {
     try {
       const params = new URLSearchParams({
         type: 'laborer',
-        addedBy: userEmail // This ensures only labor records added by this worker are fetched
+        addedBy: userEmail
       })
 
       if (filterMonth) {
@@ -103,7 +118,7 @@ export default function WorkerSalaryPage() {
       const res = await fetch(`/api/salary?${params}`)
       if (res.ok) {
         const data = await res.json()
-        setMyLaborSalaries(data) // This should now only contain labor records added by this worker
+        setMyLaborSalaries(data)
       }
     } catch (error) {
       console.error('Error fetching my labor salaries:', error)
@@ -113,9 +128,10 @@ export default function WorkerSalaryPage() {
     }
   }
 
-  // Calculate statistics
+  // ✅ NEW: Enhanced statistics calculation with advance payment tracking
   const calculateStats = () => {
-    const totalSalary = mySalaries.reduce((sum, salary) => sum + salary.amount, 0)
+    // Traditional calculations
+    const totalSalary = mySalaries.reduce((sum, salary) => sum + (salary.totalAdvancePaid || salary.amount), 0)
     const totalLaborSalary = myLaborSalaries.reduce((sum, salary) => sum + salary.amount, 0)
     const totalEarnings = totalSalary + totalLaborSalary
     
@@ -123,11 +139,26 @@ export default function WorkerSalaryPage() {
       .filter(s => s.status === 'pending')
       .reduce((sum, salary) => sum + salary.amount, 0)
 
+    // ✅ NEW: Advanced payment calculations
+    const totalAdvancesReceived = mySalaries
+      .filter(s => s.hasAdvancePayments)
+      .reduce((sum, salary) => sum + (salary.totalAdvancePaid || 0), 0)
+    
+    const pendingBalances = mySalaries
+      .reduce((sum, salary) => sum + (salary.remainingBalance || 0), 0)
+    
+    const fullyPaidSalaries = mySalaries.filter(s => s.calculatedStatus === 'fully_paid').length
+    const partialPaidSalaries = mySalaries.filter(s => s.calculatedStatus === 'partial_paid').length
+
     setStats({
       totalSalary,
       totalLaborSalary,
       totalEarnings,
-      pendingAmount
+      pendingAmount,
+      totalAdvancesReceived,
+      pendingBalances,
+      fullyPaidSalaries,
+      partialPaidSalaries
     })
   }
 
@@ -156,7 +187,7 @@ export default function WorkerSalaryPage() {
           ...data,
           type: 'laborer',
           amount: parseFloat(data.amount),
-          addedBy: userEmail // Mark as added by this worker
+          addedBy: userEmail
         })
       })
 
@@ -221,6 +252,31 @@ export default function WorkerSalaryPage() {
     }
   }
 
+  // ✅ NEW: View advance payment history
+  const viewAdvanceHistory = (salary) => {
+    setSelectedAdvanceHistory(salary)
+    setShowAdvanceHistory(true)
+  }
+
+  // ✅ NEW: Get progress bar for advance payments
+  const getProgressBar = (salary) => {
+    if (!salary.isAdvancePaymentSystem) return null
+    
+    const progress = parseFloat(salary.paymentProgress || 0)
+    const isComplete = salary.calculatedStatus === 'fully_paid'
+    
+    return (
+      <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+        <div
+          className={`h-2 rounded-full transition-all duration-300 ${
+            isComplete ? 'bg-green-500' : 'bg-blue-500'
+          }`}
+          style={{ width: `${Math.min(progress, 100)}%` }}
+        />
+      </div>
+    )
+  }
+
   // Filter data
   const filteredSalaries = mySalaries.filter(salary =>
     salary.workerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -252,12 +308,12 @@ export default function WorkerSalaryPage() {
             My Salary Dashboard
           </h1>
           <p className="text-gray-600 text-xs sm:text-sm lg:text-base">
-            Track your salary and manage labor payments
+            Track your salary, advance payments, and manage labor payments
           </p>
         </div>
 
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-6 mb-4 sm:mb-6 lg:mb-8">
+        {/* ✅ UPDATED: Enhanced Statistics Cards with advance payment tracking */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-2 sm:gap-4 lg:gap-6 mb-4 sm:mb-6 lg:mb-8">
           <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200">
             <div className="flex items-center gap-2 lg:gap-3">
               <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg">
@@ -282,26 +338,53 @@ export default function WorkerSalaryPage() {
             </div>
           </div>
 
+          {/* ✅ NEW: Advance payments received */}
+          <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200">
+            <div className="flex items-center gap-2 lg:gap-3">
+              <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg">
+                <FaCreditCard className="text-purple-600 text-sm sm:text-base lg:text-lg" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm text-gray-600">Advances</p>
+                <p className="text-lg sm:text-xl font-bold text-gray-900">${stats.totalAdvancesReceived.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ✅ NEW: Pending balances */}
+          <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200">
+            <div className="flex items-center gap-2 lg:gap-3">
+              <div className="p-1.5 sm:p-2 bg-orange-100 rounded-lg">
+                <FaChartLine className="text-orange-600 text-sm sm:text-base lg:text-lg" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm text-gray-600">Pending</p>
+                <p className="text-lg sm:text-xl font-bold text-gray-900">${stats.pendingBalances.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200">
             <div className="flex items-center gap-2 lg:gap-3">
               <div className="p-1.5 sm:p-2 bg-amber-100 rounded-lg">
                 <FaHardHat className="text-amber-600 text-sm sm:text-base lg:text-lg" />
               </div>
               <div>
-                <p className="text-xs sm:text-sm text-gray-600">Labor Salaries</p>
+                <p className="text-xs sm:text-sm text-gray-600">Labor</p>
                 <p className="text-lg sm:text-xl font-bold text-gray-900">${stats.totalLaborSalary.toLocaleString()}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200 col-span-2 lg:col-span-1">
+          {/* ✅ NEW: Payment status summary */}
+          <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-200">
             <div className="flex items-center gap-2 lg:gap-3">
-              <div className="p-1.5 sm:p-2 bg-red-100 rounded-lg">
-                <FaCalendarAlt className="text-red-600 text-sm sm:text-base lg:text-lg" />
+              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
+                <FaPercentage className="text-green-600 text-sm sm:text-base lg:text-lg" />
               </div>
               <div>
-                <p className="text-xs sm:text-sm text-gray-600">Pending</p>
-                <p className="text-lg sm:text-xl font-bold text-gray-900">${stats.pendingAmount.toLocaleString()}</p>
+                <p className="text-xs sm:text-sm text-gray-600">Completed</p>
+                <p className="text-lg sm:text-xl font-bold text-gray-900">{stats.fullyPaidSalaries}</p>
               </div>
             </div>
           </div>
@@ -519,7 +602,113 @@ export default function WorkerSalaryPage() {
           </div>
         )}
 
-        {/* Data Display */}
+        {/* ✅ NEW: Advance Payment History Modal */}
+        {showAdvanceHistory && selectedAdvanceHistory && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">
+                      My Advance Payment History
+                    </h2>
+                    <p className="text-gray-600">
+                      Salary payments from admin
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAdvanceHistory(false)
+                      setSelectedAdvanceHistory(null)
+                    }}
+                    className="text-gray-500 hover:text-gray-700 text-2xl"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 overflow-y-auto max-h-[70vh]">
+                {selectedAdvanceHistory.advancePayments && selectedAdvanceHistory.advancePayments.length > 0 ? (
+                  <div className="space-y-4">
+                    {selectedAdvanceHistory.advancePayments.map((payment, index) => (
+                      <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div>
+                            <span className="text-sm text-gray-600">Payment #{index + 1}</span>
+                            <p className="font-bold text-lg text-green-600">${payment.amount}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-gray-600">Date Received</span>
+                            <p className="font-medium">{format(new Date(payment.paidDate), 'MMM dd, yyyy')}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-gray-600">Paid By</span>
+                            <p className="font-medium">{payment.paidBy}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-gray-600">Status</span>
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                              Received
+                            </span>
+                          </div>
+                        </div>
+                        {payment.description && (
+                          <div className="mt-2">
+                            <span className="text-sm text-gray-600">Description:</span>
+                            <p className="text-sm text-gray-800">{payment.description}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Summary */}
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                      <h3 className="font-bold text-blue-900 mb-2">Payment Summary</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-blue-700">Total Salary:</span>
+                          <p className="font-bold text-blue-900">${selectedAdvanceHistory.totalSalaryAmount || selectedAdvanceHistory.amount}</p>
+                        </div>
+                        <div>
+                          <span className="text-blue-700">Total Received:</span>
+                          <p className="font-bold text-blue-900">${selectedAdvanceHistory.totalAdvancePaid}</p>
+                        </div>
+                        <div>
+                          <span className="text-blue-700">Still Pending:</span>
+                          <p className="font-bold text-blue-900">${selectedAdvanceHistory.remainingBalance}</p>
+                        </div>
+                        <div>
+                          <span className="text-blue-700">Progress:</span>
+                          <p className="font-bold text-blue-900">{selectedAdvanceHistory.paymentProgress}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <FaHistory className="mx-auto h-16 w-16 text-gray-300 mb-4" />
+                    <p className="text-gray-500">No advance payment history available</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    setShowAdvanceHistory(false)
+                    setSelectedAdvanceHistory(null)
+                  }}
+                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ UPDATED: Enhanced Data Display with Advance Payment Information */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-gray-200">
             <h2 className="text-lg sm:text-xl font-semibold text-gray-900">
@@ -528,6 +717,11 @@ export default function WorkerSalaryPage() {
                 ({activeTab === 'salary' ? filteredSalaries.length : filteredLaborSalaries.length} entries)
               </span>
             </h2>
+            {activeTab === 'salary' && stats.totalAdvancesReceived > 0 && (
+              <p className="text-sm text-blue-600 mt-1">
+                Including ${stats.totalAdvancesReceived.toLocaleString()} in advance payments received
+              </p>
+            )}
           </div>
 
           {loading ? (
@@ -536,7 +730,7 @@ export default function WorkerSalaryPage() {
               <p className="mt-2 text-gray-600">Loading...</p>
             </div>
           ) : activeTab === 'salary' ? (
-            // My Salary Records
+            // ✅ UPDATED: My Salary Records with advance payment information
             filteredSalaries.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <FaMoneyBillWave className="mx-auto h-16 w-16 text-gray-300 mb-4" />
@@ -552,13 +746,16 @@ export default function WorkerSalaryPage() {
                         Date
                       </th>
                       <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount
+                        Amount Details
+                      </th>
+                      <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Progress
                       </th>
                       <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
                       </th>
                       <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Description
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -568,22 +765,104 @@ export default function WorkerSalaryPage() {
                         <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {format(new Date(salary.paymentDate), 'MMM dd, yyyy')}
                         </td>
-                        <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
-                          ${salary.amount.toLocaleString()}
+                        <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm">
+                          {salary.isAdvancePaymentSystem ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-green-600">
+                                  ${salary.totalAdvancePaid || 0} / ${salary.totalSalaryAmount}
+                                </span>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                  Advance
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Remaining: ${salary.remainingBalance || 0}
+                              </div>
+                              {salary.hasAdvancePayments && (
+                                <div className="text-xs text-blue-600">
+                                  {salary.advancePaymentsCount} payments received
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="font-semibold text-green-600">
+                              ${salary.amount.toLocaleString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
+                          {salary.isAdvancePaymentSystem ? (
+                            <div className="w-full">
+                              <div className="flex justify-between text-xs text-gray-600 mb-1">
+                                <span>Progress</span>
+                                <span>{salary.paymentProgress}%</span>
+                              </div>
+                              {getProgressBar(salary)}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">Full Payment</span>
+                          )}
                         </td>
                         <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            salary.status === 'paid' 
+                            salary.calculatedStatus === 'fully_paid' || salary.status === 'paid'
                               ? 'bg-green-100 text-green-800' 
-                              : salary.status === 'pending'
+                              : salary.calculatedStatus === 'partial_paid'
                               ? 'bg-yellow-100 text-yellow-800'
+                              : salary.status === 'pending'
+                              ? 'bg-gray-100 text-gray-800'
                               : 'bg-red-100 text-red-800'
                           }`}>
-                            {salary.status}
+                            {salary.calculatedStatus === 'fully_paid' ? 'Fully Paid' : 
+                             salary.calculatedStatus === 'partial_paid' ? 'Partial' :
+                             salary.status || 'Pending'}
                           </span>
                         </td>
-                        <td className="px-4 sm:px-6 py-4 text-sm text-gray-900">
-                          {salary.description || 'N/A'}
+                        <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex items-center gap-1">
+                            {/* ✅ NEW: View advance payment history button */}
+                            {salary.hasAdvancePayments && (
+                              <button
+                                onClick={() => viewAdvanceHistory(salary)}
+                                className="text-purple-600 hover:text-purple-900 p-1"
+                                title="View Payment History"
+                              >
+                                <FaHistory />
+                              </button>
+                            )}
+                            
+                            {/* View Details Button */}
+                            <button
+                              onClick={() => {
+                                Swal.fire({
+                                  title: 'Salary Details',
+                                  html: `
+                                    <div class="text-left space-y-2">
+                                      <p><strong>Date:</strong> ${format(new Date(salary.paymentDate), 'MMM dd, yyyy')}</p>
+                                      ${salary.isAdvancePaymentSystem ? `
+                                        <p><strong>Total Salary:</strong> $${salary.totalSalaryAmount}</p>
+                                        <p><strong>Received so far:</strong> $${salary.totalAdvancePaid}</p>
+                                        <p><strong>Remaining:</strong> $${salary.remainingBalance}</p>
+                                        <p><strong>Advance Payments:</strong> ${salary.advancePaymentsCount || 0}</p>
+                                        <p><strong>Progress:</strong> ${salary.paymentProgress}%</p>
+                                      ` : `
+                                        <p><strong>Amount:</strong> $${salary.amount}</p>
+                                      `}
+                                      <p><strong>Status:</strong> ${salary.calculatedStatus || salary.status}</p>
+                                      ${salary.description ? `<p><strong>Description:</strong> ${salary.description}</p>` : ''}
+                                    </div>
+                                  `,
+                                  icon: 'info',
+                                  confirmButtonColor: '#3b82f6'
+                                })
+                              }}
+                              className="text-blue-600 hover:text-blue-900 p-1"
+                              title="View Details"
+                            >
+                              <FaEye />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -592,7 +871,7 @@ export default function WorkerSalaryPage() {
               </div>
             )
           ) : (
-            // My Labor Records
+            // My Labor Records (unchanged)
             filteredLaborSalaries.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <FaHardHat className="mx-auto h-16 w-16 text-gray-300 mb-4" />

@@ -7,7 +7,7 @@ export default function AdminProductionPage() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(false)
   const [imageFile, setImageFile] = useState(null)
-  const [pdfFile, setPdfFile] = useState(null) // Added pdfFile state
+  const [pdfFile, setPdfFile] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -25,17 +25,19 @@ export default function AdminProductionPage() {
   const [showMaterialsModal, setShowMaterialsModal] = useState(false)
   const [selectedJobMaterials, setSelectedJobMaterials] = useState(null)
 
-  // Form state with materials
+  // ✅ UPDATED: Form state with product code
   const [formData, setFormData] = useState({
     product: '',
+    productCode: '', // ✅ NEW: Product code field
     description: '',
     quantity: '',
     materials: [{ name: '', price: '' }],
   })
 
-  // Edit form state with materials
+  // ✅ UPDATED: Edit form state with product code
   const [editFormData, setEditFormData] = useState({
     productName: '',
+    productCode: '', // ✅ NEW: Product code field for edit
     description: '',
     quantity: '',
     materials: [{ name: '', price: '' }],
@@ -193,14 +195,15 @@ export default function AdminProductionPage() {
       }
     })
 
+  // ✅ UPDATED: Submit handler with product code
   const handleSubmit = async (e) => {
     e.preventDefault()
     console.log('🚀 Form submission started')
     console.log('📝 Form data:', formData)
 
-    if (!formData.product || !formData.quantity) {
+    if (!formData.product || !formData.quantity || !formData.productCode) { // ✅ Added productCode validation
       console.error('❌ Missing required fields')
-      Swal.fire('Warning', 'Please fill in all required fields', 'warning')
+      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, and Quantity)', 'warning')
       return
     }
 
@@ -211,6 +214,7 @@ export default function AdminProductionPage() {
       const formDataToSend = new FormData()
       
       formDataToSend.append('productName', formData.product)
+      formDataToSend.append('productCode', formData.productCode) // ✅ NEW: Add product code
       formDataToSend.append('description', formData.description)
       formDataToSend.append('quantity', formData.quantity)
       
@@ -252,13 +256,14 @@ export default function AdminProductionPage() {
         Swal.fire('Success!', responseData.message || 'Job created successfully', 'success')
         setFormData({
           product: '',
+          productCode: '', // ✅ Reset product code
           description: '',
           quantity: '',
           materials: [{ name: '', price: '' }],
         })
         setMaterialCount(1)
         setImageFile(null)
-        setPdfFile(null) // Reset PDF file
+        setPdfFile(null)
         
         // Reset file inputs
         const imageInput = document.querySelector('input[type="file"][accept*="image"]')
@@ -283,7 +288,7 @@ export default function AdminProductionPage() {
     }
   }
 
-  // PATCH status update function - THIS WAS MISSING!
+  // PATCH status update function
   const handleStatusChange = async (jobId, newStatus) => {
     console.log('🔄 Updating job status:', { jobId, newStatus })
     try {
@@ -341,6 +346,7 @@ export default function AdminProductionPage() {
       html: `
       <div class="text-left">
         <p><strong>Job:</strong> ${job.productName}</p>
+        <p><strong>Product Code:</strong> ${job.productCode || 'Not specified'}</p>
         <p><strong>Original Quantity:</strong> ${job.quantity}</p>
         <p><strong>Fulfilled:</strong> ${job.fulfilledQuantity || 0}</p>
         ${companyInfo}
@@ -392,12 +398,13 @@ export default function AdminProductionPage() {
     }
   }
 
-  // Edit job functions
+  // ✅ UPDATED: Edit job functions with product code
   const handleEditConfirm = (job) => {
     console.log('✏️ Editing job:', job.productName)
     setJobToEdit(job)
     setEditFormData({
       productName: job.productName,
+      productCode: job.productCode || '', // ✅ NEW: Load existing product code
       description: job.description,
       quantity: job.quantity.toString(),
       materials:
@@ -408,9 +415,13 @@ export default function AdminProductionPage() {
     setShowEditModal(true)
   }
 
+  // ✅ UPDATED: Edit submit with product code
   const handleEditSubmit = async (e) => {
     e.preventDefault()
-    if (!editFormData.productName || !editFormData.quantity) return
+    if (!editFormData.productName || !editFormData.quantity || !editFormData.productCode) { // ✅ Added productCode validation
+      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, and Quantity)', 'warning')
+      return
+    }
     setEditLoading(true)
 
     console.log('📝 Updating job:', editFormData)
@@ -431,6 +442,7 @@ export default function AdminProductionPage() {
           },
           body: JSON.stringify({
             productName: editFormData.productName,
+            productCode: editFormData.productCode, // ✅ NEW: Include product code in update
             description: editFormData.description,
             quantity: parseInt(editFormData.quantity),
             materials: validMaterials,
@@ -669,13 +681,13 @@ export default function AdminProductionPage() {
         Admin Production Jobs
       </h1>
 
-      {/* Enhanced Form with Materials */}
+      {/* ✅ UPDATED: Enhanced Form with Product Code */}
       <form
         onSubmit={handleSubmit}
         className="bg-white p-6 rounded-xl shadow-lg max-w-2xl mx-auto mb-8 border border-amber-200"
       >
-        {/* Basic Product Info */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* ✅ UPDATED: Basic Product Info with Product Code */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block font-medium text-amber-900 mb-2 text-sm">
               Product Name *
@@ -687,6 +699,20 @@ export default function AdminProductionPage() {
               onChange={handleChange}
               className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
               placeholder="Moneybag, Wallet..."
+              required
+            />
+          </div>
+          <div>
+            <label className="block font-medium text-amber-900 mb-2 text-sm">
+              Product Code *
+            </label>
+            <input
+              type="text"
+              name="productCode"
+              value={formData.productCode}
+              onChange={handleChange}
+              className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
+              placeholder="PD-001, WL-100..."
               required
             />
           </div>
@@ -721,7 +747,7 @@ export default function AdminProductionPage() {
           />
         </div>
 
-        {/* Materials Section */}
+        {/* Materials Section - Keep existing code */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <label className="block font-medium text-amber-900 text-sm">
@@ -893,7 +919,7 @@ export default function AdminProductionPage() {
         </button>
       </form>
 
-      {/* Compact Job List with Enhanced Materials Display */}
+      {/* ✅ UPDATED: Compact Job List with Product Code Display */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {jobs.map((job) => {
           const hasValidImage =
@@ -934,11 +960,19 @@ export default function AdminProductionPage() {
               )}
 
               <div className="p-3">
-                {/* Header with Action Buttons */}
+                {/* ✅ UPDATED: Header with Product Code and Action Buttons */}
                 <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-bold text-amber-900 text-sm truncate flex-1">
-                    {job.productName}
-                  </h3>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-amber-900 text-sm truncate">
+                      {job.productName}
+                    </h3>
+                    {/* ✅ NEW: Display product code */}
+                    {job.productCode && (
+                      <p className="text-xs text-blue-600 font-medium truncate">
+                        Code: {job.productCode}
+                      </p>
+                    )}
+                  </div>
                   <div className="flex gap-1 ml-2">
                     {/* PDF Download Button */}
                     {job.pdfFile?.fileId && (
@@ -995,7 +1029,7 @@ export default function AdminProductionPage() {
                   {job.description || 'No description'}
                 </p>
 
-                {/* Enhanced Materials Display */}
+                {/* Enhanced Materials Display - Keep existing code */}
                 {job.materials && job.materials.length > 0 && (
                   <div className="bg-blue-50 rounded-lg p-3 mb-2 border border-blue-200">
                     <div className="flex items-center justify-between mb-2">
@@ -1141,6 +1175,7 @@ export default function AdminProductionPage() {
         })}
       </div>
 
+      {/* Keep all existing modals unchanged... */}
       {/* Detailed Materials Modal */}
       {showMaterialsModal && selectedJobMaterials && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1152,6 +1187,12 @@ export default function AdminProductionPage() {
                   <h2 className="text-xl font-bold text-blue-900">
                     Materials for {selectedJobMaterials.productName}
                   </h2>
+                  {/* ✅ NEW: Show product code in modal */}
+                  {selectedJobMaterials.productCode && (
+                    <p className="text-blue-600 text-sm font-medium">
+                      Product Code: {selectedJobMaterials.productCode}
+                    </p>
+                  )}
                   <p className="text-blue-700 text-sm">
                     Complete material breakdown and costing
                   </p>
@@ -1165,7 +1206,7 @@ export default function AdminProductionPage() {
               </div>
             </div>
 
-            {/* Modal Content */}
+            {/* Modal Content - Keep existing */}
             <div className="p-6 overflow-y-auto max-h-[60vh]">
               {selectedJobMaterials.materials &&
               selectedJobMaterials.materials.length > 0 ? (
@@ -1292,7 +1333,7 @@ export default function AdminProductionPage() {
         </div>
       )}
 
-      {/* Applications Modal */}
+      {/* Applications Modal - Keep existing */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
@@ -1316,7 +1357,7 @@ export default function AdminProductionPage() {
               </div>
             </div>
 
-            {/* Modal Content */}
+            {/* Modal Content - Keep existing content... */}
             <div className="p-6 overflow-y-auto max-h-[70vh]">
               {selectedJobApplications.length === 0 ? (
                 <div className="text-center py-12">
@@ -1576,25 +1617,42 @@ export default function AdminProductionPage() {
         </div>
       )}
 
-      {/* Edit Job Modal */}
+      {/* ✅ UPDATED: Edit Job Modal with Product Code */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <h2 className="text-2xl font-bold text-amber-900 mb-6">Edit Job</h2>
 
             <form onSubmit={handleEditSubmit}>
-              <div className="mb-4">
-                <label className="block font-medium text-amber-900 mb-1">
-                  Product Name
-                </label>
-                <input
-                  type="text"
-                  name="productName"
-                  value={editFormData.productName}
-                  onChange={handleEditChange}
-                  className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
-                  required
-                />
+              {/* ✅ UPDATED: Product Name and Product Code */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block font-medium text-amber-900 mb-1">
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="productName"
+                    value={editFormData.productName}
+                    onChange={handleEditChange}
+                    className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-amber-900 mb-1">
+                    Product Code *
+                  </label>
+                  <input
+                    type="text"
+                    name="productCode"
+                    value={editFormData.productCode}
+                    onChange={handleEditChange}
+                    className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
+                    placeholder="PD-001, WL-100..."
+                    required
+                  />
+                </div>
               </div>
 
               <div className="mb-4">
@@ -1612,7 +1670,7 @@ export default function AdminProductionPage() {
 
               <div className="mb-4">
                 <label className="block font-medium text-amber-900 mb-1">
-                  Quantity Needed
+                  Quantity Needed *
                 </label>
                 <input
                   type="number"
@@ -1630,7 +1688,7 @@ export default function AdminProductionPage() {
                 )}
               </div>
 
-              {/* Edit Materials Section */}
+              {/* Edit Materials Section - Keep existing code */}
               <div className="mb-6">
                 <label className="block font-medium text-amber-900 mb-3">
                   Materials Required
@@ -1744,7 +1802,7 @@ export default function AdminProductionPage() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal - Keep existing */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6">
@@ -1772,6 +1830,11 @@ export default function AdminProductionPage() {
                 <span className="font-semibold">
                   "{jobToDelete?.productName}"
                 </span>
+                {jobToDelete?.productCode && (
+                  <span className="text-blue-600">
+                    {' '}(Code: {jobToDelete.productCode})
+                  </span>
+                )}
                 ? This will permanently remove the job, all applications, and
                 the associated image and PDF files. This action cannot be undone.
               </p>
