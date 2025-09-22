@@ -1391,7 +1391,7 @@ export default function AdminReportsPage() {
               <div>
                 <p className="text-xs sm:text-sm text-gray-600">Total</p>
                 <p className="text-lg sm:text-xl font-bold text-gray-900">
-                  {reportStats.totalReports}
+                  {reportStats?.totalReports}
                 </p>
               </div>
             </div>

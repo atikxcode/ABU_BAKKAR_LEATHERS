@@ -70,8 +70,8 @@ export default function WorkerReportsPage() {
       ])
 
       // Filter data for current worker only
-      const myLeatherData = leatherData.filter(item => item.workerEmail === userEmail)
-      const myMaterialData = materialData.filter(item => item.workerEmail === userEmail)
+      const myLeatherData = leatherData?.filter(item => item.workerEmail === userEmail)
+      const myMaterialData = materialData?.filter(item => item.workerEmail === userEmail)
       
       // For finished products, filter by worker contributions
       const myFinishedData = finishedData.filter(product => {
