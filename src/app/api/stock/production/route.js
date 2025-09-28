@@ -2,6 +2,8 @@ import clientPromise from '@/lib/mongodb'
 import { NextResponse } from 'next/server'
 import { ObjectId } from 'mongodb'
 import { GridFSBucket } from 'mongodb'
+import jsPDF from 'jspdf'
+import 'jspdf-autotable'
 
 const imageHostingKey = process.env.NEXT_PUBLIC_IMGBB_KEY
 const imageHostingApi = `https://api.imgbb.com/1/upload?key=${imageHostingKey}`
@@ -9,6 +11,17 @@ const imageHostingApi = `https://api.imgbb.com/1/upload?key=${imageHostingKey}`
 const isAdmin = (req) => {
   const role = req.headers.get('role')
   return role === 'admin'
+}
+
+// ✅ NEW: Worker authentication helper
+const isWorker = (req) => {
+  const role = req.headers.get('role')
+  return role === 'worker'
+}
+
+// ✅ NEW: Get worker email from request
+const getWorkerEmail = (req) => {
+  return req.headers.get('worker-email') || req.headers.get('user-email')
 }
 
 // Helper function to get client IP for audit trail
@@ -181,6 +194,7 @@ export async function GET(req) {
 
   try {
     const { searchParams } = new URL(req.url)
+    const productCode = searchParams.get('productCode') // New search parameter
     const downloadFile = searchParams.get('downloadFile')
     const fileId = searchParams.get('fileId')
     const getNetQuantities = searchParams.get('getNetQuantities') // NEW: Get net quantities
@@ -235,8 +249,23 @@ export async function GET(req) {
       }
     }
 
+    let query = {}
+    if (productCode) query.productCode = { $regex: new RegExp(productCode, 'i') } // Add product code search
+
+    // ✅ NEW: Worker access control - only show jobs assigned to them or open jobs
+    if (isWorker(req)) {
+      const workerEmail = getWorkerEmail(req)
+      if (workerEmail) {
+        query.$or = [
+          { 'assignedWorker.email': workerEmail }, // Jobs assigned to this worker
+          { status: { $in: ['open', 'pending'] }, assignedWorker: { $exists: false } } // Open jobs without assignment
+        ]
+        console.log('👷 Worker access - filtering jobs for:', workerEmail)
+      }
+    }
+
     // Regular production jobs query
-    const items = await productionCollection.find().toArray()
+    const items = await productionCollection.find(query).toArray()
     console.log(`📦 Found ${items.length} production jobs`)
 
     // NEW: Get net quantities for finished products if requested
@@ -348,6 +377,42 @@ export async function GET(req) {
       return NextResponse.json(responseData)
     }
 
+    // Add downloadable details endpoint logic
+    if (searchParams.get('downloadDetails') && itemsWithApplications.length === 1) {
+      const job = itemsWithApplications[0]
+      const doc = new jsPDF()
+      doc.setFontSize(16)
+      doc.text(`Product Details - ${job.productName}`, 10, 10)
+      doc.setFontSize(12)
+      doc.text(`Product Code: ${job.productCode || 'N/A'}`, 10, 20)
+      doc.text(`Description: ${job.description || 'No description'}`, 10, 30)
+      doc.text(`Quantity: ${job.quantity}`, 10, 40)
+      doc.text(`Fulfilled: ${job.fulfilledQuantity || 0}`, 10, 50)
+      doc.text(`VAT %: ${job.vatPercentage || 0}%`, 10, 60)
+      const totalMaterialCost = job.materials.reduce((sum, material) => sum + material.price, 0)
+      const totalCostWithVAT = totalMaterialCost * (job.fulfilledQuantity || 0) * (1 + (parseFloat(job.vatPercentage || 0) / 100))
+      doc.text(`Total Cost (including VAT): $${totalCostWithVAT.toFixed(2)}`, 10, 70)
+
+      if (job.images && job.images[0]) {
+        const imgResponse = await fetch(job.images[0])
+        const imgBlob = await imgResponse.blob()
+        const imgData = await new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result)
+          reader.readAsDataURL(imgBlob)
+        })
+        doc.addImage(imgData, 'JPEG', 10, 80, 50, 50)
+      }
+
+      const pdfBuffer = doc.output('arraybuffer')
+      return new NextResponse(pdfBuffer, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${job.productName}_details.pdf"`,
+        },
+      })
+    }
+
     console.log('✅ GET /api/stock/production - Success')
     return NextResponse.json(itemsWithApplications)
   } catch (err) {
@@ -362,10 +427,20 @@ export async function POST(req) {
   console.log('🔧 IMGBB Key present:', !!imageHostingKey)
 
   try {
+    // ✅ NEW: Check if user is admin (workers cannot create production jobs)
+    if (!isAdmin(req)) {
+      console.error('❌ Unauthorized: Only admins can create production jobs')
+      return NextResponse.json(
+        { error: 'Unauthorized: Only admins can create production jobs' },
+        { status: 403 }
+      )
+    }
+
     // Check if it's form data (for file uploads) or JSON
     const contentType = req.headers.get('content-type')
     let body = {}
     let pdfFile = null
+    const imageFiles = []
 
     if (contentType && contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
@@ -374,12 +449,16 @@ export async function POST(req) {
       for (const [key, value] of formData.entries()) {
         if (key === 'pdfFile') {
           pdfFile = value
+        } else if (key.startsWith('image')) {
+          imageFiles.push(value) // ✅ NEW: Collect all image files
         } else if (key === 'materials') {
           try {
             body[key] = JSON.parse(value)
           } catch {
             body[key] = value
           }
+        } else if (key === 'workerEmail') {
+          body[key] = value
         } else {
           body[key] = value
         }
@@ -393,17 +472,19 @@ export async function POST(req) {
       productCode: body.productCode, // ✅ NEW: Log product code
       quantity: body.quantity,
       description: body.description?.substring(0, 50),
-      hasImage: !!body.image,
+      hasImages: imageFiles.length > 0,
       hasPdf: !!pdfFile,
       materialsCount: body.materials?.length || 0,
+      workerEmail: body.workerEmail,
+      vatPercentage: body.vatPercentage,
     })
 
-    // ✅ UPDATED: Enhanced validation with product code
-    if (!body.productName || !body.quantity) {
+    // ✅ UPDATED: Enhanced validation with product code, VAT, and worker assignment
+    if (!body.productName || !body.quantity || !body.productCode || !body.vatPercentage) {
       console.error('❌ Missing required fields')
       return NextResponse.json(
         {
-          error: 'Product name and quantity are required',
+          error: 'Product name, product code, quantity, and VAT % are required',
         },
         { status: 400 }
       )
@@ -440,7 +521,7 @@ export async function POST(req) {
       }
     }
 
-    if (!imageHostingKey && body.image) {
+    if (!imageHostingKey && imageFiles.length > 0) {
       console.error('❌ IMGBB API key not configured')
       return NextResponse.json(
         {
@@ -454,46 +535,51 @@ export async function POST(req) {
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
     const collection = db.collection('production')
+    const userCollection = db.collection('user') // For worker lookup
     const auditCollection = db.collection('audit_logs') // NEW: Audit logging
     console.log('✅ MongoDB connected successfully')
 
-    let imageUrl = null
-    let deleteUrl = null
+    let imageUrls = []
+    let deleteUrls = []
 
-    // Handle image upload (existing functionality)
-    if (body.image) {
-      console.log('📷 Uploading image to IMGBB...')
-      try {
-        const form = new URLSearchParams()
-        form.append('image', body.image)
+    // ✅ NEW: Handle multiple image uploads
+    if (imageFiles.length > 0) {
+      console.log('📷 Uploading multiple images to IMGBB...')
+      for (const [index, file] of imageFiles.entries()) {
+        try {
+          const form = new URLSearchParams()
+          const imageBase64 = await fileToBase64(file)
+          form.append('image', imageBase64)
 
-        const uploadRes = await fetch(imageHostingApi, {
-          method: 'POST',
-          body: form,
-        })
+          const uploadRes = await fetch(imageHostingApi, {
+            method: 'POST',
+            body: form,
+          })
 
-        console.log('📷 IMGBB response status:', uploadRes.status)
+          console.log(`📷 IMGBB response status for image ${index + 1}:`, uploadRes.status)
 
-        if (!uploadRes.ok) {
-          const errorText = await uploadRes.text()
-          console.error('❌ IMGBB upload failed:', errorText)
-          throw new Error(`Image upload failed with status ${uploadRes.status}`)
+          if (!uploadRes.ok) {
+            const errorText = await uploadRes.text()
+            console.error(`❌ IMGBB upload failed for image ${index + 1}:`, errorText)
+            throw new Error(`Image ${index + 1} upload failed with status ${uploadRes.status}`)
+          }
+
+          const uploadData = await uploadRes.json()
+          console.log(`📷 IMGBB upload result for image ${index + 1}:`, uploadData.success)
+
+          if (uploadData.success) {
+            imageUrls.push(uploadData.data.display_url)
+            deleteUrls.push(uploadData.data.delete_url)
+            console.log(`✅ Image ${index + 1} uploaded successfully`)
+          } else {
+            console.error(`❌ IMGBB upload failed for image ${index + 1}:`, uploadData)
+            throw new Error(`Image ${index + 1} upload failed: ${JSON.stringify(uploadData)}`)
+          }
+        } catch (imageError) {
+          console.error(`❌ Image ${index + 1} upload error:`, imageError)
+          console.log('⚠️ Continuing without all images')
+          break
         }
-
-        const uploadData = await uploadRes.json()
-        console.log('📷 IMGBB upload result:', uploadData.success)
-
-        if (uploadData.success) {
-          imageUrl = uploadData.data.display_url
-          deleteUrl = uploadData.data.delete_url
-          console.log('✅ Image uploaded successfully')
-        } else {
-          console.error('❌ IMGBB upload failed:', uploadData)
-          throw new Error('Image upload failed: ' + JSON.stringify(uploadData))
-        }
-      } catch (imageError) {
-        console.error('❌ Image upload error:', imageError)
-        console.log('⚠️ Continuing without image')
       }
     }
 
@@ -526,7 +612,23 @@ export async function POST(req) {
 
     console.log('💾 Inserting document to MongoDB...')
 
-    // ✅ UPDATED: Enhanced production job document with product code
+    // ✅ NEW: Worker lookup and assignment
+    let worker = null
+    if (body.workerEmail) {
+      worker = await userCollection.findOne({ email: body.workerEmail })
+      if (!worker) {
+        console.warn('⚠️ Worker email not found:', body.workerEmail)
+      }
+    }
+
+    // ✅ NEW: Determine status based on worker assignment
+    let jobStatus = body.status || 'pending'
+    if (worker) {
+      jobStatus = 'assigned' // Automatically set to assigned if worker is assigned
+      console.log('👷 Job assigned to worker:', worker.email, '- Status set to assigned')
+    }
+
+    // ✅ UPDATED: Enhanced production job document with product code, VAT, and worker assignment
     const document = {
       productName: body.productName,
       productCode: validatedProductCode, // ✅ NEW: Add product code field
@@ -537,10 +639,11 @@ export async function POST(req) {
       unit: body.unit || 'pcs',
       materials: formattedMaterials,
       totalMaterialCost: totalMaterialCost,
-      image: imageUrl,
-      imageDeleteUrl: deleteUrl,
+      vatPercentage: parseFloat(body.vatPercentage), // ✅ NEW: VAT percentage
+      images: imageUrls, // ✅ NEW: Multiple images
+      imageDeleteUrls: deleteUrls, // ✅ NEW: Multiple delete URLs
       date: new Date(),
-      status: body.status || 'pending',
+      status: jobStatus, // ✅ NEW: Status based on worker assignment
       createdAt: new Date(),
       updatedAt: new Date(),
       
@@ -568,9 +671,18 @@ export async function POST(req) {
       }
     }
 
+    // ✅ NEW: Add worker assignment if found
+    if (worker) {
+      document.assignedWorker = {
+        email: worker.email,
+        name: worker.name || 'Unknown',
+        assignedAt: new Date(),
+      }
+    }
+
     const result = await collection.insertOne(document)
 
-    // ✅ UPDATED: Enhanced audit log with product code
+    // ✅ UPDATED: Enhanced audit log with product code, VAT, and worker assignment
     await auditCollection.insertOne({
       action: 'production_job_created',
       resourceType: 'production',
@@ -580,9 +692,14 @@ export async function POST(req) {
         productCode: validatedProductCode, // ✅ NEW: Include product code in audit
         quantity: Number(body.quantity),
         materialsCost: totalMaterialCost,
+        vatPercentage: parseFloat(body.vatPercentage), // ✅ NEW: VAT in audit
         hasPdfFile: !!pdfFileId,
-        hasImage: !!imageUrl,
-        note: 'Production job created with enhanced tracking and product code support'
+        hasImages: imageUrls.length > 0,
+        imagesCount: imageUrls.length, // ✅ NEW: Image count
+        workerEmail: body.workerEmail,
+        workerAssigned: !!worker,
+        statusSetTo: jobStatus, // ✅ NEW: Status in audit
+        note: 'Production job created with multiple images, VAT, and worker assignment'
       },
       timestamp: new Date(),
       clientIP: getClientIP(req),
@@ -599,8 +716,12 @@ export async function POST(req) {
         insertedId: result.insertedId,
         message: pdfFile ? 'Production job created with PDF file' : 'Production job created',
         fileUploaded: !!pdfFileId,
+        imagesUploaded: imageUrls.length, // ✅ NEW: Image count in response
         productCode: validatedProductCode, // ✅ NEW: Return validated product code
-        note: 'Enhanced with finished product tracking and product code support'
+        vatPercentage: parseFloat(body.vatPercentage), // ✅ NEW: VAT in response
+        workerAssigned: !!worker,
+        status: jobStatus, // ✅ NEW: Status in response
+        note: 'Enhanced with multiple images, VAT, and worker assignment'
       },
       { status: 201 }
     )
@@ -654,7 +775,9 @@ export async function PATCH(req) {
       id, 
       productName: body.productName,
       productCode: body.productCode, // ✅ NEW: Log product code updates
-      hasPdf: !!pdfFile 
+      hasPdf: !!pdfFile,
+      workerEmail: body.workerEmail,
+      vatPercentage: body.vatPercentage,
     })
 
     if (!id) {
@@ -667,8 +790,44 @@ export async function PATCH(req) {
       return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 })
     }
 
-    // ✅ NEW: Validate product code if being updated
-    if (body.productCode !== undefined) {
+    // ✅ NEW: Access control - workers can only update jobs assigned to them
+    const client = await clientPromise
+    const db = client.db('AbuBakkarLeathers')
+    const collection = db.collection('production')
+    const userCollection = db.collection('user') // For worker lookup
+    const auditCollection = db.collection('audit_logs') // NEW: Audit logging
+
+    // Get existing document for validation and audit trail
+    const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
+    if (!existingDoc) {
+      return NextResponse.json(
+        { error: 'Production job not found' },
+        { status: 404 }
+      )
+    }
+
+    // ✅ NEW: Worker access control
+    if (isWorker(req)) {
+      const workerEmail = getWorkerEmail(req)
+      if (!existingDoc.assignedWorker || existingDoc.assignedWorker.email !== workerEmail) {
+        console.error('❌ Unauthorized: Worker can only update assigned jobs')
+        return NextResponse.json(
+          { error: 'Unauthorized: You can only update jobs assigned to you' },
+          { status: 403 }
+        )
+      }
+      // Workers cannot change certain fields
+      const workerRestrictedFields = ['productName', 'productCode', 'quantity', 'materials', 'vatPercentage', 'workerEmail']
+      workerRestrictedFields.forEach(field => {
+        if (body[field] !== undefined) {
+          console.warn(`⚠️ Worker attempted to modify restricted field: ${field}`)
+          delete body[field]
+        }
+      })
+    }
+
+    // ✅ NEW: Validate product code if being updated (admin only)
+    if (body.productCode !== undefined && isAdmin(req)) {
       const validatedProductCode = validateProductCode(body.productCode)
       if (body.productCode && !validatedProductCode) {
         console.error('❌ Invalid product code format')
@@ -700,22 +859,8 @@ export async function PATCH(req) {
       }
     }
 
-    const client = await clientPromise
-    const db = client.db('AbuBakkarLeathers')
-    const collection = db.collection('production')
-    const auditCollection = db.collection('audit_logs') // NEW: Audit logging
-
-    // Get existing document for audit trail
-    const existingDoc = await collection.findOne({ _id: new ObjectId(id) })
-    if (!existingDoc) {
-      return NextResponse.json(
-        { error: 'Production job not found' },
-        { status: 404 }
-      )
-    }
-
-    // Handle PDF file update
-    if (pdfFile && pdfFile.size > 0) {
+    // Handle PDF file update (admin only)
+    if (pdfFile && pdfFile.size > 0 && isAdmin(req)) {
       try {
         // Delete old PDF file if exists
         if (existingDoc?.pdfFile?.fileId) {
@@ -749,7 +894,7 @@ export async function PATCH(req) {
       }
     }
 
-    if (body.materials) {
+    if (body.materials && isAdmin(req)) {
       const formattedMaterials = validateAndFormatMaterials(body.materials)
       body.materials = formattedMaterials
       body.totalMaterialCost = formattedMaterials.reduce(
@@ -759,7 +904,7 @@ export async function PATCH(req) {
       console.log('🧾 Updated materials:', formattedMaterials.length)
     }
 
-    if (body.quantity !== undefined) {
+    if (body.quantity !== undefined && isAdmin(req)) {
       const fulfilledQuantity = existingDoc.fulfilledQuantity || 0
       body.remainingQuantity = Math.max(
         0,
@@ -768,34 +913,76 @@ export async function PATCH(req) {
       console.log('🔄 Updated remaining quantity:', body.remainingQuantity)
     }
 
-    // ✅ UPDATED: Enhanced update data with product code audit trail
+    // ✅ NEW: Worker assignment handling (admin only)
+    let newWorker = null
+    if (body.workerEmail !== undefined && isAdmin(req)) {
+      if (body.workerEmail) {
+        newWorker = await userCollection.findOne({ email: body.workerEmail })
+        if (!newWorker) {
+          console.warn('⚠️ Worker email not found:', body.workerEmail)
+        } else {
+          body.assignedWorker = {
+            email: newWorker.email,
+            name: newWorker.name || 'Unknown',
+            assignedAt: new Date(),
+          }
+          // Set status to assigned if worker is assigned
+          if (existingDoc.status !== 'assigned') {
+            body.status = 'assigned'
+            console.log('👷 Job assigned to worker:', newWorker.email, '- Status set to assigned')
+          }
+        }
+      } else {
+        // Remove worker assignment
+        body.$unset = { assignedWorker: "" }
+        if (existingDoc.status === 'assigned') {
+          body.status = 'pending'
+          console.log('👷 Worker assignment removed - Status set to pending')
+        }
+      }
+    }
+
+    // ✅ UPDATED: Enhanced update data with product code and worker assignment audit trail
     const updateData = {
-      ...body, 
+      ...body,
       updatedAt: new Date(),
-      lastModifiedBy: 'admin',
+      lastModifiedBy: isAdmin(req) ? 'admin' : 'worker',
       lastModifiedReason: body.updateReason || 'production_job_update',
       clientIP: getClientIP(req),
       userAgent: req.headers.get('user-agent') || 'unknown',
     }
 
+    const updateQuery = { $set: updateData }
+    if (body.$unset) {
+      updateQuery.$unset = body.$unset
+      delete updateData.$unset
+    }
+
     const result = await collection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: updateData }
+      updateQuery
     )
 
-    // ✅ UPDATED: Enhanced audit log with product code changes
+    // ✅ UPDATED: Enhanced audit log with product code and worker assignment changes
     await auditCollection.insertOne({
       action: 'production_job_updated',
       resourceType: 'production',
       resourceId: id,
       details: {
-        updatedFields: Object.keys(body),
+        updatedFields: Object.keys(body).filter(key => key !== '$unset'),
         originalData: existingDoc,
         hasPdfUpdate: !!pdfFile,
         productCodeChanged: body.productCode !== undefined && body.productCode !== existingDoc.productCode,
         oldProductCode: existingDoc.productCode,
         newProductCode: body.productCode,
-        note: 'Production job updated with enhanced tracking and product code support'
+        workerAssignmentChanged: body.workerEmail !== undefined,
+        oldWorkerEmail: existingDoc.assignedWorker?.email,
+        newWorkerEmail: body.workerEmail,
+        vatPercentageChanged: body.vatPercentage !== undefined && body.vatPercentage !== existingDoc.vatPercentage,
+        oldVatPercentage: existingDoc.vatPercentage,
+        newVatPercentage: body.vatPercentage,
+        updatedBy: isAdmin(req) ? 'admin' : 'worker',
+        note: 'Production job updated with enhanced tracking, product code, and worker assignment support'
       },
       timestamp: new Date(),
       clientIP: getClientIP(req),
@@ -808,7 +995,10 @@ export async function PATCH(req) {
       ...result, 
       message: pdfFile ? 'Production job updated with new PDF file' : 'Production job updated',
       productCode: body.productCode, // ✅ NEW: Return updated product code
-      note: 'Enhanced tracking and product code support preserved'
+      workerAssigned: !!newWorker,
+      vatPercentage: body.vatPercentage,
+      status: body.status,
+      note: 'Enhanced tracking, product code, and worker assignment support preserved'
     })
   } catch (err) {
     console.error('❌ PATCH /api/stock/production error:', err)
@@ -854,18 +1044,19 @@ export async function DELETE(req) {
 
     console.log('📋 Found job to delete:', job.productName, 'Code:', job.productCode)
 
-    let imageDeleted = false
+    let imagesDeleted = 0
     let pdfDeleted = false
 
-    // Delete image from IMGBB if exists
-    if (job.image) {
-      console.log('🗑️ Deleting image from IMGBB...')
-      imageDeleted = await deleteImageFromImgbb(job.image)
-      console.log(
-        `📷 Image deletion ${
-          imageDeleted ? 'successful' : 'failed'
-        } for job ${id}`
-      )
+    // ✅ NEW: Delete multiple images from IMGBB if they exist
+    if (job.images && job.images.length > 0) {
+      console.log('🗑️ Deleting multiple images from IMGBB...')
+      for (const imageUrl of job.images) {
+        const deleted = await deleteImageFromImgbb(imageUrl)
+        if (deleted) {
+          imagesDeleted++
+        }
+      }
+      console.log(`📷 ${imagesDeleted}/${job.images.length} images deleted successfully`)
     }
 
     // Delete PDF from GridFS if exists
@@ -893,7 +1084,7 @@ export async function DELETE(req) {
       _id: new ObjectId(id),
     })
 
-    // ✅ UPDATED: Enhanced audit log with product code information
+    // ✅ UPDATED: Enhanced audit log with product code, VAT, and worker assignment information
     await auditCollection.insertOne({
       action: 'production_job_deleted',
       resourceType: 'production',
@@ -903,10 +1094,13 @@ export async function DELETE(req) {
         productName: job.productName,
         productCode: job.productCode, // ✅ NEW: Include product code in audit
         quantity: job.quantity,
+        vatPercentage: job.vatPercentage, // ✅ NEW: VAT in audit
+        assignedWorker: job.assignedWorker, // ✅ NEW: Worker assignment in audit
         applicationsDeleted: applicationsDeleteResult.deletedCount,
-        imageDeleted: imageDeleted,
+        imagesDeleted: imagesDeleted, // ✅ NEW: Multiple images
+        totalImages: job.images?.length || 0, // ✅ NEW: Total image count
         pdfDeleted: pdfDeleted,
-        note: 'Complete production job deletion with cleanup and product code tracking'
+        note: 'Complete production job deletion with cleanup, product code, VAT, and worker assignment tracking'
       },
       timestamp: new Date(),
       clientIP: getClientIP(req),
@@ -919,10 +1113,13 @@ export async function DELETE(req) {
       message: 'Production job and related data deleted successfully',
       jobDeleted: jobDeleteResult.deletedCount > 0,
       applicationsDeleted: applicationsDeleteResult.deletedCount,
-      imageDeleted: imageDeleted,
+      imagesDeleted: imagesDeleted, // ✅ NEW: Multiple images deleted count
+      totalImages: job.images?.length || 0, // ✅ NEW: Total images
       pdfDeleted: pdfDeleted,
       productCode: job.productCode, // ✅ NEW: Return deleted product code
-      note: 'Enhanced audit trail with product code tracking preserved'
+      vatPercentage: job.vatPercentage, // ✅ NEW: Return VAT
+      assignedWorker: job.assignedWorker?.email, // ✅ NEW: Return assigned worker
+      note: 'Enhanced audit trail with product code, VAT, and worker assignment tracking preserved'
     })
   } catch (err) {
     console.error('❌ DELETE /api/stock/production error:', err)
@@ -930,3 +1127,22 @@ export async function DELETE(req) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+
+// ✅ NEW: Node.js compatible file to base64 conversion
+const fileToBase64 = async (file) => {
+  try {
+    console.log('📄 Converting file to base64 (Node.js)...')
+    
+    // Convert File/Blob to Buffer using arrayBuffer
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    const base64 = buffer.toString('base64')
+    
+    console.log('📄 Base64 conversion complete, length:', base64.length)
+    return base64
+  } catch (error) {
+    console.error('❌ Base64 conversion failed:', error)
+    throw error
+  }
+}
+

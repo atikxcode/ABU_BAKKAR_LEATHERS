@@ -6,7 +6,7 @@ import Swal from 'sweetalert2'
 export default function AdminProductionPage() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(false)
-  const [imageFile, setImageFile] = useState(null)
+  const [imageFiles, setImageFiles] = useState([]) // ✅ NEW: Multiple images
   const [pdfFile, setPdfFile] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -20,27 +20,32 @@ export default function AdminProductionPage() {
   const [editLoading, setEditLoading] = useState(false)
   const [imageLoadErrors, setImageLoadErrors] = useState({})
   const [deliveryInputs, setDeliveryInputs] = useState({})
+  const [workers, setWorkers] = useState([]) // ✅ NEW: Workers list
 
   // Materials modal state
   const [showMaterialsModal, setShowMaterialsModal] = useState(false)
   const [selectedJobMaterials, setSelectedJobMaterials] = useState(null)
 
-  // ✅ UPDATED: Form state with product code
+  // ✅ UPDATED: Form state with worker assignment and VAT
   const [formData, setFormData] = useState({
     product: '',
-    productCode: '', // ✅ NEW: Product code field
+    productCode: '',
     description: '',
     quantity: '',
     materials: [{ name: '', price: '' }],
+    workerEmail: '', // ✅ NEW: Worker assignment
+    vatPercentage: '', // ✅ NEW: VAT percentage
   })
 
-  // ✅ UPDATED: Edit form state with product code
+  // ✅ UPDATED: Edit form state with worker assignment and VAT
   const [editFormData, setEditFormData] = useState({
     productName: '',
-    productCode: '', // ✅ NEW: Product code field for edit
+    productCode: '',
     description: '',
     quantity: '',
     materials: [{ name: '', price: '' }],
+    workerEmail: '', // ✅ NEW: Worker assignment for edit
+    vatPercentage: '', // ✅ NEW: VAT percentage for edit
   })
 
   // Material count selector state
@@ -53,6 +58,19 @@ export default function AdminProductionPage() {
       [jobId]: true,
     }))
   }
+
+  // ✅ NEW: Fetch workers for assignment
+  const fetchWorkers = async () => {
+  try {
+    const res = await fetch('/api/user?role=worker') // ✅ Changed from /api/stock/users
+    if (res.ok) {
+      const data = await res.json()
+      setWorkers(data.filter(user => user.status === 'approved')) // ✅ Only approved workers
+    }
+  } catch (err) {
+    console.error('❌ Failed to fetch workers:', err)
+  }
+}
 
   const fetchJobs = async () => {
     console.log('📡 Fetching jobs...')
@@ -77,6 +95,7 @@ export default function AdminProductionPage() {
 
   useEffect(() => {
     fetchJobs()
+    fetchWorkers() // ✅ NEW: Fetch workers on mount
   }, [])
 
   // Show detailed materials modal
@@ -152,10 +171,11 @@ export default function AdminProductionPage() {
     }
   }
 
+  // ✅ NEW: Handle multiple image selection
   const handleImageChange = (e) => {
-    const file = e.target.files[0]
-    console.log('📷 Image selected:', file?.name, file?.size)
-    setImageFile(file)
+    const files = Array.from(e.target.files)
+    console.log('📷 Images selected:', files.length)
+    setImageFiles(files)
   }
 
   // Added handler for PDF file
@@ -195,15 +215,15 @@ export default function AdminProductionPage() {
       }
     })
 
-  // ✅ UPDATED: Submit handler with product code
+  // ✅ UPDATED: Submit handler with worker assignment, VAT, and multiple images
   const handleSubmit = async (e) => {
     e.preventDefault()
     console.log('🚀 Form submission started')
     console.log('📝 Form data:', formData)
 
-    if (!formData.product || !formData.quantity || !formData.productCode) { // ✅ Added productCode validation
+    if (!formData.product || !formData.quantity || !formData.productCode || !formData.vatPercentage) {
       console.error('❌ Missing required fields')
-      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, and Quantity)', 'warning')
+      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, Quantity, and VAT %)', 'warning')
       return
     }
 
@@ -214,9 +234,11 @@ export default function AdminProductionPage() {
       const formDataToSend = new FormData()
       
       formDataToSend.append('productName', formData.product)
-      formDataToSend.append('productCode', formData.productCode) // ✅ NEW: Add product code
+      formDataToSend.append('productCode', formData.productCode)
       formDataToSend.append('description', formData.description)
       formDataToSend.append('quantity', formData.quantity)
+      formDataToSend.append('vatPercentage', formData.vatPercentage) // ✅ NEW: VAT
+      formDataToSend.append('workerEmail', formData.workerEmail) // ✅ NEW: Worker assignment
       
       // Filter out empty materials and stringify for FormData
       const validMaterials = formData.materials.filter(
@@ -224,11 +246,12 @@ export default function AdminProductionPage() {
       )
       formDataToSend.append('materials', JSON.stringify(validMaterials))
 
-      // Handle image file (convert to base64 for IMGBB compatibility)
-      if (imageFile) {
-        console.log('📷 Processing image file...')
-        const imageBase64 = await fileToBase64(imageFile)
-        formDataToSend.append('image', imageBase64)
+      // ✅ NEW: Handle multiple image files
+      if (imageFiles.length > 0) {
+        console.log('📷 Processing multiple image files...')
+        for (let i = 0; i < imageFiles.length; i++) {
+          formDataToSend.append(`image${i}`, imageFiles[i])
+        }
       }
 
       // Handle PDF file (send as file object)
@@ -256,13 +279,15 @@ export default function AdminProductionPage() {
         Swal.fire('Success!', responseData.message || 'Job created successfully', 'success')
         setFormData({
           product: '',
-          productCode: '', // ✅ Reset product code
+          productCode: '',
           description: '',
           quantity: '',
           materials: [{ name: '', price: '' }],
+          workerEmail: '', // ✅ Reset worker assignment
+          vatPercentage: '', // ✅ Reset VAT
         })
         setMaterialCount(1)
-        setImageFile(null)
+        setImageFiles([]) // ✅ Reset multiple images
         setPdfFile(null)
         
         // Reset file inputs
@@ -347,6 +372,7 @@ export default function AdminProductionPage() {
       <div class="text-left">
         <p><strong>Job:</strong> ${job.productName}</p>
         <p><strong>Product Code:</strong> ${job.productCode || 'Not specified'}</p>
+        <p><strong>VAT %:</strong> ${job.vatPercentage || 0}%</p>
         <p><strong>Original Quantity:</strong> ${job.quantity}</p>
         <p><strong>Fulfilled:</strong> ${job.fulfilledQuantity || 0}</p>
         ${companyInfo}
@@ -398,28 +424,30 @@ export default function AdminProductionPage() {
     }
   }
 
-  // ✅ UPDATED: Edit job functions with product code
+  // ✅ UPDATED: Edit job functions with worker assignment and VAT
   const handleEditConfirm = (job) => {
     console.log('✏️ Editing job:', job.productName)
     setJobToEdit(job)
     setEditFormData({
       productName: job.productName,
-      productCode: job.productCode || '', // ✅ NEW: Load existing product code
+      productCode: job.productCode || '',
       description: job.description,
       quantity: job.quantity.toString(),
       materials:
         job.materials && job.materials.length > 0
           ? job.materials
           : [{ name: '', price: '' }],
+      workerEmail: job.assignedWorker?.email || '', // ✅ NEW: Load worker assignment
+      vatPercentage: job.vatPercentage?.toString() || '', // ✅ NEW: Load VAT
     })
     setShowEditModal(true)
   }
 
-  // ✅ UPDATED: Edit submit with product code
+  // ✅ UPDATED: Edit submit with worker assignment and VAT
   const handleEditSubmit = async (e) => {
     e.preventDefault()
-    if (!editFormData.productName || !editFormData.quantity || !editFormData.productCode) { // ✅ Added productCode validation
-      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, and Quantity)', 'warning')
+    if (!editFormData.productName || !editFormData.quantity || !editFormData.productCode || !editFormData.vatPercentage) {
+      Swal.fire('Warning', 'Please fill in all required fields (Product Name, Product Code, Quantity, and VAT %)', 'warning')
       return
     }
     setEditLoading(true)
@@ -442,10 +470,12 @@ export default function AdminProductionPage() {
           },
           body: JSON.stringify({
             productName: editFormData.productName,
-            productCode: editFormData.productCode, // ✅ NEW: Include product code in update
+            productCode: editFormData.productCode,
             description: editFormData.description,
             quantity: parseInt(editFormData.quantity),
             materials: validMaterials,
+            workerEmail: editFormData.workerEmail, // ✅ NEW: Worker assignment update
+            vatPercentage: parseFloat(editFormData.vatPercentage), // ✅ NEW: VAT update
           }),
         }
       )
@@ -681,13 +711,13 @@ export default function AdminProductionPage() {
         Admin Production Jobs
       </h1>
 
-      {/* ✅ UPDATED: Enhanced Form with Product Code */}
+      {/* ✅ UPDATED: Enhanced Form with VAT, Worker Assignment, and Multiple Images */}
       <form
         onSubmit={handleSubmit}
-        className="bg-white p-6 rounded-xl shadow-lg max-w-2xl mx-auto mb-8 border border-amber-200"
+        className="bg-white p-6 rounded-xl shadow-lg max-w-4xl mx-auto mb-8 border border-amber-200"
       >
-        {/* ✅ UPDATED: Basic Product Info with Product Code */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        {/* ✅ UPDATED: Basic Product Info with Product Code, Quantity, and VAT */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div>
             <label className="block font-medium text-amber-900 mb-2 text-sm">
               Product Name *
@@ -731,6 +761,46 @@ export default function AdminProductionPage() {
               required
             />
           </div>
+          {/* ✅ NEW: VAT Percentage Field */}
+          <div>
+            <label className="block font-medium text-amber-900 mb-2 text-sm">
+              VAT (%) *
+            </label>
+            <input
+              type="number"
+              name="vatPercentage"
+              value={formData.vatPercentage}
+              onChange={handleChange}
+              className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
+              placeholder="15"
+              min="0"
+              step="0.1"
+              required
+            />
+          </div>
+        </div>
+
+        {/* ✅ NEW: Worker Assignment Field */}
+        <div className="mb-4">
+          <label className="block font-medium text-amber-900 mb-2 text-sm">
+            Assign Worker (Optional)
+          </label>
+          <select
+            name="workerEmail"
+            value={formData.workerEmail}
+            onChange={handleChange}
+            className="w-full border border-amber-300 px-3 py-2 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-sm"
+          >
+            <option value="">Select a worker (optional)</option>
+            {workers.map((worker) => (
+              <option key={worker._id} value={worker.email}>
+                {worker.name} ({worker.email})
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            If assigned, status will be set to 'assigned' and worker will have access to this job
+          </p>
         </div>
 
         <div className="mb-4">
@@ -863,6 +933,19 @@ export default function AdminProductionPage() {
                     )
                     .toFixed(2)}
                 </span>
+                {/* ✅ NEW: Show cost with VAT */}
+                {formData.vatPercentage && (
+                  <span className="text-amber-700 ml-2">
+                    (With {formData.vatPercentage}% VAT: ৳
+                    {(formData.materials
+                      .reduce(
+                        (sum, material) =>
+                          sum + (parseFloat(material.price) || 0),
+                        0
+                      ) * (1 + parseFloat(formData.vatPercentage || 0) / 100)
+                    ).toFixed(2)})
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -894,20 +977,31 @@ export default function AdminProductionPage() {
           <p className="text-xs text-gray-500 mt-1">Max file size: 5MB</p>
         </div>
 
-        {/* Image Upload */}
+        {/* ✅ NEW: Multiple Image Upload */}
         <div className="mb-4">
           <label className="block font-medium text-amber-900 mb-2 text-sm">
-            Product Image
+            Product Images (Multiple)
           </label>
           <label className="cursor-pointer flex justify-center items-center w-full h-12 bg-amber-200 text-amber-900 font-medium rounded-lg hover:bg-amber-300 transition text-sm">
-            {imageFile ? imageFile.name : 'Choose Image File'}
+            {imageFiles.length > 0 ? (
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                {imageFiles.length} image{imageFiles.length > 1 ? 's' : ''} selected
+              </span>
+            ) : (
+              'Choose Image Files (Multiple)'
+            )}
             <input
               type="file"
               onChange={handleImageChange}
               className="hidden"
               accept="image/*"
+              multiple
             />
           </label>
+          <p className="text-xs text-gray-500 mt-1">You can select multiple images at once</p>
         </div>
 
         <button
@@ -919,11 +1013,10 @@ export default function AdminProductionPage() {
         </button>
       </form>
 
-      {/* ✅ UPDATED: Compact Job List with Product Code Display */}
+      {/* ✅ UPDATED: Compact Job List with VAT, Worker Assignment, and Multiple Images Display */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {jobs.map((job) => {
-          const hasValidImage =
-            job.image && job.image.trim() !== '' && !imageLoadErrors[job._id]
+          const hasValidImage = job.images && job.images.length > 0
           const remainingQuantity = job.remainingQuantity || 0
           const fulfilledQuantity = job.fulfilledQuantity || 0
 
@@ -932,15 +1025,34 @@ export default function AdminProductionPage() {
               key={job._id}
               className="bg-white rounded-xl shadow-md border border-amber-200 hover:shadow-lg transition overflow-hidden"
             >
-              {/* Compact Image */}
+              {/* ✅ UPDATED: Multiple Images Display */}
               {hasValidImage ? (
                 <div className="relative h-64">
-                  <img
-                    src={job.image}
-                    alt={job.productName}
-                    className="w-full h-full object-cover bg-gray-50"
-                    onError={() => handleImageError(job._id)}
-                  />
+                  {job.images.length === 1 ? (
+                    <img
+                      src={job.images[0]}
+                      alt={job.productName}
+                      className="w-full h-full object-cover bg-gray-50"
+                      onError={() => handleImageError(job._id)}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-1 h-full">
+                      {job.images.slice(0, 4).map((image, index) => (
+                        <img
+                          key={index}
+                          src={image}
+                          alt={`${job.productName} ${index + 1}`}
+                          className="w-full h-full object-cover bg-gray-50"
+                          onError={() => handleImageError(job._id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {job.images.length > 4 && (
+                    <div className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs">
+                      +{job.images.length - 4} more
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="relative h-32 bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center">
@@ -960,18 +1072,31 @@ export default function AdminProductionPage() {
               )}
 
               <div className="p-3">
-                {/* ✅ UPDATED: Header with Product Code and Action Buttons */}
+                {/* ✅ UPDATED: Header with Product Code, VAT, and Action Buttons */}
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-amber-900 text-sm truncate">
                       {job.productName}
                     </h3>
-                    {/* ✅ NEW: Display product code */}
-                    {job.productCode && (
-                      <p className="text-xs text-blue-600 font-medium truncate">
-                        Code: {job.productCode}
-                      </p>
-                    )}
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {job.productCode && (
+                        <span className="text-xs text-blue-600 font-medium bg-blue-50 px-1 py-0.5 rounded">
+                          {job.productCode}
+                        </span>
+                      )}
+                      {/* ✅ NEW: VAT Display */}
+                      {job.vatPercentage && (
+                        <span className="text-xs text-green-600 font-medium bg-green-50 px-1 py-0.5 rounded">
+                          VAT {job.vatPercentage}%
+                        </span>
+                      )}
+                      {/* ✅ NEW: Worker Assignment Display */}
+                      {job.assignedWorker && (
+                        <span className="text-xs text-purple-600 font-medium bg-purple-50 px-1 py-0.5 rounded">
+                          Assigned
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-1 ml-2">
                     {/* PDF Download Button */}
@@ -1029,6 +1154,19 @@ export default function AdminProductionPage() {
                   {job.description || 'No description'}
                 </p>
 
+                {/* ✅ NEW: Worker Assignment Info */}
+                {job.assignedWorker && (
+                  <div className="bg-purple-50 rounded-lg p-2 mb-2 border border-purple-200">
+                    <div className="text-xs text-purple-900 font-semibold mb-1">
+                      Assigned Worker:
+                    </div>
+                    <div className="text-xs text-purple-800">
+                      <div>{job.assignedWorker.name}</div>
+                      <div className="text-purple-600">{job.assignedWorker.email}</div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Enhanced Materials Display - Keep existing code */}
                 {job.materials && job.materials.length > 0 && (
                   <div className="bg-blue-50 rounded-lg p-3 mb-2 border border-blue-200">
@@ -1039,6 +1177,12 @@ export default function AdminProductionPage() {
                       {job.totalMaterialCost && (
                         <div className="text-xs font-bold text-blue-800">
                           ৳{job.totalMaterialCost.toFixed(2)}
+                          {/* ✅ NEW: Show cost with VAT */}
+                          {job.vatPercentage && (
+                            <div className="text-green-700 font-medium">
+                              +VAT: ৳{(job.totalMaterialCost * (1 + job.vatPercentage / 100)).toFixed(2)}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1073,13 +1217,13 @@ export default function AdminProductionPage() {
                             <span className="font-bold">
                               ৳
                               {(
-                                job.totalMaterialCost * fulfilledQuantity
+                                job.totalMaterialCost * fulfilledQuantity * (1 + (job.vatPercentage || 0) / 100)
                               ).toFixed(2)}
                             </span>
                           </div>
                           <div className="text-blue-600 mt-1">
                             ({fulfilledQuantity} units × ৳
-                            {job.totalMaterialCost.toFixed(2)})
+                            {(job.totalMaterialCost * (1 + (job.vatPercentage || 0) / 100)).toFixed(2)})
                           </div>
                         </div>
                       </div>
@@ -1132,13 +1276,16 @@ export default function AdminProductionPage() {
                         ? 'text-green-600 border-green-300'
                         : job.status === 'pending'
                         ? 'text-yellow-600 border-yellow-300'
+                        : job.status === 'assigned'
+                        ? 'text-purple-600 border-purple-300'
                         : job.status === 'closed'
                         ? 'text-red-600 border-red-300'
-                        : 'text-purple-600 border-purple-300'
+                        : 'text-gray-600 border-gray-300'
                     }`}
                   >
                     <option value="pending">Pending</option>
                     <option value="open">Open</option>
+                    <option value="assigned">Assigned</option>
                     <option value="closed">Closed</option>
                     <option value="finished">Finished</option>
                   </select>
@@ -1175,8 +1322,8 @@ export default function AdminProductionPage() {
         })}
       </div>
 
-      {/* Keep all existing modals unchanged... */}
-      {/* Detailed Materials Modal */}
+      {/* Keep all existing modals but update edit modal with worker assignment and VAT... */}
+      {/* Detailed Materials Modal - Same as before */}
       {showMaterialsModal && selectedJobMaterials && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
@@ -1187,10 +1334,15 @@ export default function AdminProductionPage() {
                   <h2 className="text-xl font-bold text-blue-900">
                     Materials for {selectedJobMaterials.productName}
                   </h2>
-                  {/* ✅ NEW: Show product code in modal */}
                   {selectedJobMaterials.productCode && (
                     <p className="text-blue-600 text-sm font-medium">
                       Product Code: {selectedJobMaterials.productCode}
+                    </p>
+                  )}
+                  {/* ✅ NEW: Show VAT in modal */}
+                  {selectedJobMaterials.vatPercentage && (
+                    <p className="text-green-600 text-sm font-medium">
+                      VAT: {selectedJobMaterials.vatPercentage}%
                     </p>
                   )}
                   <p className="text-blue-700 text-sm">
@@ -1206,7 +1358,7 @@ export default function AdminProductionPage() {
               </div>
             </div>
 
-            {/* Modal Content - Keep existing */}
+            {/* Modal Content - Keep existing... */}
             <div className="p-6 overflow-y-auto max-h-[60vh]">
               {selectedJobMaterials.materials &&
               selectedJobMaterials.materials.length > 0 ? (
@@ -1252,6 +1404,16 @@ export default function AdminProductionPage() {
                             ) || '0.00'}
                           </span>
                         </div>
+                        {/* ✅ NEW: Show VAT calculation */}
+                        {selectedJobMaterials.vatPercentage && (
+                          <div className="flex justify-between">
+                            <span className="text-green-800">Cost with VAT ({selectedJobMaterials.vatPercentage}%):</span>
+                            <span className="font-bold text-green-900">
+                              ৳
+                              {((selectedJobMaterials.totalMaterialCost || 0) * (1 + selectedJobMaterials.vatPercentage / 100)).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-blue-800">Total quantity:</span>
                           <span className="font-bold text-blue-900">
@@ -1273,9 +1435,9 @@ export default function AdminProductionPage() {
                             </span>
                             <span className="font-bold text-blue-800">
                               ৳
-                              {(
-                                selectedJobMaterials.totalMaterialCost *
-                                (selectedJobMaterials.fulfilledQuantity || 0)
+                              {((selectedJobMaterials.totalMaterialCost || 0) *
+                                (selectedJobMaterials.fulfilledQuantity || 0) *
+                                (1 + (selectedJobMaterials.vatPercentage || 0) / 100)
                               ).toFixed(2)}
                             </span>
                           </div>
@@ -1287,26 +1449,20 @@ export default function AdminProductionPage() {
                   {/* Production Examples */}
                   <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                     <h4 className="font-semibold text-green-900 mb-2">
-                      Production Cost Examples
+                      Production Cost Examples (with VAT)
                     </h4>
                     <div className="text-sm text-green-800 space-y-1">
                       <p>
                         For 100 units: ৳
-                        {(selectedJobMaterials.totalMaterialCost * 100).toFixed(
-                          2
-                        )}
+                        {((selectedJobMaterials.totalMaterialCost || 0) * 100 * (1 + (selectedJobMaterials.vatPercentage || 0) / 100)).toFixed(2)}
                       </p>
                       <p>
                         For 500 units: ৳
-                        {(selectedJobMaterials.totalMaterialCost * 500).toFixed(
-                          2
-                        )}
+                        {((selectedJobMaterials.totalMaterialCost || 0) * 500 * (1 + (selectedJobMaterials.vatPercentage || 0) / 100)).toFixed(2)}
                       </p>
                       <p>
                         For 1000 units: ৳
-                        {(
-                          selectedJobMaterials.totalMaterialCost * 1000
-                        ).toFixed(2)}
+                        {((selectedJobMaterials.totalMaterialCost || 0) * 1000 * (1 + (selectedJobMaterials.vatPercentage || 0) / 100)).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -1333,7 +1489,7 @@ export default function AdminProductionPage() {
         </div>
       )}
 
-      {/* Applications Modal - Keep existing */}
+      {/* Applications Modal - Keep existing... */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
@@ -1617,15 +1773,15 @@ export default function AdminProductionPage() {
         </div>
       )}
 
-      {/* ✅ UPDATED: Edit Job Modal with Product Code */}
+      {/* ✅ UPDATED: Edit Job Modal with Worker Assignment and VAT */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
             <h2 className="text-2xl font-bold text-amber-900 mb-6">Edit Job</h2>
 
             <form onSubmit={handleEditSubmit}>
-              {/* ✅ UPDATED: Product Name and Product Code */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* ✅ UPDATED: Product Name, Code, Quantity, and VAT */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                 <div>
                   <label className="block font-medium text-amber-900 mb-1">
                     Product Name *
@@ -1653,6 +1809,62 @@ export default function AdminProductionPage() {
                     required
                   />
                 </div>
+                <div>
+                  <label className="block font-medium text-amber-900 mb-1">
+                    Quantity Needed *
+                  </label>
+                  <input
+                    type="number"
+                    name="quantity"
+                    value={editFormData.quantity}
+                    onChange={handleEditChange}
+                    className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
+                    required
+                    min="1"
+                  />
+                  {jobToEdit && (
+                    <p className="text-sm text-gray-600 mt-1">
+                      Current fulfilled: {jobToEdit.fulfilledQuantity || 0} pieces
+                    </p>
+                  )}
+                </div>
+                {/* ✅ NEW: VAT Percentage Field */}
+                <div>
+                  <label className="block font-medium text-amber-900 mb-1">
+                    VAT (%) *
+                  </label>
+                  <input
+                    type="number"
+                    name="vatPercentage"
+                    value={editFormData.vatPercentage}
+                    onChange={handleEditChange}
+                    className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
+                    placeholder="15"
+                    min="0"
+                    step="0.1"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* ✅ NEW: Worker Assignment Field for Edit */}
+              <div className="mb-4">
+                <label className="block font-medium text-amber-900 mb-1">
+                  Assign Worker (Optional)
+                </label>
+                <select
+                  name="workerEmail"
+                  value={editFormData.workerEmail}
+                  onChange={handleEditChange}
+                  className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
+                >
+                  <option value="">Select a worker (optional)</option>
+                  {workers.map((worker) => (
+                    <option key={worker._id} value={worker.email}>
+                      {worker.name} ({worker.email})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="mb-4">
@@ -1666,26 +1878,6 @@ export default function AdminProductionPage() {
                   rows={4}
                   className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
                 />
-              </div>
-
-              <div className="mb-4">
-                <label className="block font-medium text-amber-900 mb-1">
-                  Quantity Needed *
-                </label>
-                <input
-                  type="number"
-                  name="quantity"
-                  value={editFormData.quantity}
-                  onChange={handleEditChange}
-                  className="w-full border border-amber-300 px-4 py-2 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-none transition"
-                  required
-                  min="1"
-                />
-                {jobToEdit && (
-                  <p className="text-sm text-gray-600 mt-1">
-                    Current fulfilled: {jobToEdit.fulfilledQuantity || 0} pieces
-                  </p>
-                )}
               </div>
 
               {/* Edit Materials Section - Keep existing code */}
@@ -1835,8 +2027,13 @@ export default function AdminProductionPage() {
                     {' '}(Code: {jobToDelete.productCode})
                   </span>
                 )}
+                {jobToDelete?.vatPercentage && (
+                  <span className="text-green-600">
+                    {' '}(VAT: {jobToDelete.vatPercentage}%)
+                  </span>
+                )}
                 ? This will permanently remove the job, all applications, and
-                the associated image and PDF files. This action cannot be undone.
+                the associated images and PDF files. This action cannot be undone.
               </p>
               <div className="flex gap-3">
                 <button

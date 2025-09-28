@@ -15,6 +15,11 @@ export default function WorkerProductionPage() {
   const [filter, setFilter] = useState('all') // all, open, applied
   const [imageLoadErrors, setImageLoadErrors] = useState({}) // Track failed image loads
 
+  // ✅ NEW: Check if job is assigned to current worker
+  const isAssignedToMe = (job) => {
+    return job.assignedWorker && job.assignedWorker.email === userEmail
+  }
+
   // ----------------- Handle image load error -----------------
   const handleImageError = (jobId) => {
     setImageLoadErrors((prev) => ({
@@ -51,10 +56,16 @@ export default function WorkerProductionPage() {
     }
   }
 
-  // ----------------- Fetch all production jobs -----------------
+  // ✅ UPDATED: Fetch jobs with worker authentication
   const fetchJobs = async () => {
     try {
-      const res = await fetch('/api/stock/production')
+      const res = await fetch('/api/stock/production', {
+        headers: {
+          'role': 'worker',
+          'worker-email': userEmail,
+          'user-email': userEmail
+        }
+      })
       if (!res.ok) throw new Error('Failed to fetch jobs')
       const jobsData = await res.json()
       setJobs(jobsData)
@@ -105,6 +116,80 @@ export default function WorkerProductionPage() {
         [e.target.name]: e.target.value,
       },
     })
+  }
+
+  // ✅ NEW: Handle direct contribution for assigned workers
+  const handleDirectContribution = async (job) => {
+    const input = formInputs[job._id]
+
+    if (!input || !input.quantity) {
+      return Swal.fire('Warning', 'Please enter quantity to contribute', 'warning')
+    }
+
+    if (Number(input.quantity) <= 0) {
+      return Swal.fire('Warning', 'Quantity must be greater than 0', 'warning')
+    }
+
+    const result = await Swal.fire({
+      title: 'Confirm Direct Contribution',
+      html: `
+        <div class="text-left space-y-2">
+          <p><strong>Job:</strong> ${job.productName}</p>
+          ${job.productCode ? `<p><strong>Product Code:</strong> ${job.productCode}</p>` : ''}
+          <p><strong>Your Contribution:</strong> ${input.quantity} pieces</p>
+          <p><strong>Status:</strong> Directly assigned to you</p>
+          ${input.note ? `<p><strong>Note:</strong> ${input.note}</p>` : ''}
+        </div>
+      `,
+      icon: 'info',
+      showCancelButton: true,
+      confirmButtonColor: '#7c3aed',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Contribute Now'
+    })
+
+    if (!result.isConfirmed) return
+
+    setLoading(true)
+    try {
+      // Use the same API but with different status/flow for assigned workers
+      const res = await fetch('/api/stock/production_apply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          role: 'worker',
+          email: userEmail,
+        },
+        body: JSON.stringify({
+          jobId: job._id,
+          quantity: Number(input.quantity),
+          note: input.note?.trim() || 'Direct contribution from assigned worker',
+          company: 'Assigned Worker', // Or get from user profile
+          isDirectContribution: true, // Flag for assigned workers
+          autoApprove: true // Could auto-approve since they're assigned
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok) {
+        Swal.fire({
+          title: 'Contribution Recorded!',
+          text: `Your contribution of ${input.quantity} pieces has been recorded directly.`,
+          icon: 'success',
+          confirmButtonColor: '#7c3aed',
+          timer: 3000,
+        })
+        fetchAppliedJobs()
+        fetchJobs()
+        setFormInputs({ ...formInputs, [job._id]: {} })
+      } else {
+        Swal.fire('Error', data.error || 'Failed to record contribution', 'error')
+      }
+    } catch (err) {
+      Swal.fire('Error', err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
   }
 
   // ✅ UPDATED: Handle apply with unlimited quantity support
@@ -494,8 +579,8 @@ export default function WorkerProductionPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredJobs.map((job) => {
             const quantityInfo = getQuantityDisplayInfo(job)
-            const hasValidImage =
-              job.image && job.image.trim() !== '' && !imageLoadErrors[job._id]
+            // ✅ UPDATED: Handle multiple images
+            const hasValidImages = job.images && job.images.length > 0 && !imageLoadErrors[job._id]
 
             return (
               <div
@@ -506,15 +591,34 @@ export default function WorkerProductionPage() {
                     : 'border-amber-200'
                 }`}
               >
-                {/* Compact Image Section */}
-                {hasValidImage ? (
+                {/* ✅ UPDATED: Multiple Images Section */}
+                {hasValidImages ? (
                   <div className="relative h-64">
-                    <img
-                      src={job.image}
-                      alt={job.productName}
-                      className="w-full h-full object-cover bg-gray-50"
-                      onError={() => handleImageError(job._id)}
-                    />
+                    {job.images.length === 1 ? (
+                      <img
+                        src={job.images[0]}
+                        alt={job.productName}
+                        className="w-full h-full object-cover bg-gray-50"
+                        onError={() => handleImageError(job._id)}
+                      />
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1 h-full">
+                        {job.images.slice(0, 4).map((image, index) => (
+                          <img
+                            key={index}
+                            src={image}
+                            alt={`${job.productName} ${index + 1}`}
+                            className="w-full h-full object-cover bg-gray-50"
+                            onError={() => handleImageError(job._id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {job.images.length > 4 && (
+                      <div className="absolute bottom-2 right-2 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs">
+                        +{job.images.length - 4} more
+                      </div>
+                    )}
                     {/* Badges */}
                     <div className="absolute top-1 right-1 flex gap-1">
                       {appliedJobs[job._id] &&
@@ -554,6 +658,12 @@ export default function WorkerProductionPage() {
                           {job.productCode}
                         </p>
                       )}
+                      {/* ✅ NEW: VAT display */}
+                      {job.vatPercentage && (
+                        <p className="text-green-600 text-xs font-medium truncate px-2">
+                          VAT: {job.vatPercentage}%
+                        </p>
+                      )}
                     </div>
 
                     {/* Badges */}
@@ -579,7 +689,7 @@ export default function WorkerProductionPage() {
                 )}
 
                 <div className="p-3">
-                  {/* Job Info Header with PDF Download Button */}
+                  {/* ✅ UPDATED: Job Info Header with Assignment Status */}
                   <div className="flex justify-between items-start mb-1">
                     <div className="flex-1">
                       <h3 className="font-bold text-amber-900 text-sm truncate">
@@ -590,6 +700,21 @@ export default function WorkerProductionPage() {
                         <p className="text-blue-600 text-xs font-medium truncate">
                           Code: {job.productCode}
                         </p>
+                      )}
+                      {/* ✅ NEW: VAT display */}
+                      {job.vatPercentage && (
+                        <p className="text-green-600 text-xs font-medium truncate">
+                          VAT: {job.vatPercentage}%
+                        </p>
+                      )}
+                      {/* ✅ NEW: Assignment indicator */}
+                      {isAssignedToMe(job) && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                          <span className="text-purple-600 text-xs font-semibold">
+                            Assigned to You
+                          </span>
+                        </div>
                       )}
                     </div>
                     {/* PDF Download Button */}
@@ -685,6 +810,8 @@ export default function WorkerProductionPage() {
                           ? 'text-green-600'
                           : job.status === 'pending'
                           ? 'text-yellow-600'
+                          : job.status === 'assigned'
+                          ? 'text-purple-600'
                           : 'text-red-600'
                       }`}
                     >
@@ -695,81 +822,125 @@ export default function WorkerProductionPage() {
                     </span>
                   </div>
 
-                  {/* ✅ UPDATED: Application Form for Unlimited Applications */}
+                  {/* ✅ UPDATED: Different behavior for assigned vs non-assigned jobs */}
                   {job.status === 'open' && !appliedJobs[job._id] && (
                     <div className="border-t border-amber-200 pt-2 space-y-2">
-                      {/* ✅ UPDATED: Enhanced cost calculator */}
-                      {job.totalMaterialCost && (
-                        <div className="bg-green-50 rounded p-2 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className="text-green-700">
-                              Est. material cost:
-                            </span>
-                            <span className="font-semibold text-green-800">
-                              ৳
-                              {(
-                                job.totalMaterialCost *
-                                (Number(formInputs[job._id]?.quantity) || 1)
-                              ).toFixed(2)}
+                      {/* ✅ NEW: Show assigned job contribution form */}
+                      {isAssignedToMe(job) ? (
+                        <div className="bg-purple-50 rounded-lg p-2 mb-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                            <span className="text-purple-700 text-xs font-semibold">
+                              Assigned to You - Direct Contribution
                             </span>
                           </div>
-                          <div className="text-green-600 text-xs mt-1">
-                            ({job.totalMaterialCost.toFixed(2)} ×{' '}
-                            {formInputs[job._id]?.quantity || 1} units)
-                          </div>
+                          
+                          {/* Direct contribution form (simplified) */}
+                          <input
+                            type="number"
+                            name="quantity"
+                            value={formInputs[job._id]?.quantity || ''}
+                            onChange={(e) => handleChange(job._id, e)}
+                            placeholder="Enter quantity to contribute"
+                            className="w-full border border-purple-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-purple-400 focus:outline-none transition text-xs"
+                            min="1"
+                            required
+                          />
+                          
+                          <textarea
+                            name="note"
+                            value={formInputs[job._id]?.note || ''}
+                            onChange={(e) => handleChange(job._id, e)}
+                            rows={2}
+                            placeholder="Progress note (optional)"
+                            className="w-full mt-2 border border-purple-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-purple-400 focus:outline-none transition text-xs resize-none"
+                          />
+                          
+                          <button
+                            onClick={() => handleDirectContribution(job)}
+                            disabled={loading}
+                            className="w-full mt-2 bg-purple-600 text-white font-semibold py-2 px-3 rounded-lg hover:bg-purple-700 transition disabled:opacity-50 text-xs"
+                          >
+                            {loading ? 'Contributing...' : 'Contribute Directly'}
+                          </button>
                         </div>
-                      )}
+                      ) : (
+                        // ✅ EXISTING: Regular application form for non-assigned jobs
+                        <>
+                          {/* ✅ UPDATED: Enhanced cost calculator */}
+                          {job.totalMaterialCost && (
+                            <div className="bg-green-50 rounded p-2 text-xs">
+                              <div className="flex justify-between items-center">
+                                <span className="text-green-700">
+                                  Est. material cost:
+                                </span>
+                                <span className="font-semibold text-green-800">
+                                  ৳
+                                  {(
+                                    job.totalMaterialCost *
+                                    (Number(formInputs[job._id]?.quantity) || 1)
+                                  ).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="text-green-600 text-xs mt-1">
+                                ({job.totalMaterialCost.toFixed(2)} ×{' '}
+                                {formInputs[job._id]?.quantity || 1} units)
+                              </div>
+                            </div>
+                          )}
 
-                      {/* ✅ UPDATED: Quantity Input with unlimited support */}
-                      <div className="relative">
-                        <input
-                          type="number"
-                          name="quantity"
-                          value={formInputs[job._id]?.quantity || ''}
-                          onChange={(e) => handleChange(job._id, e)}
-                          placeholder="Enter any quantity (e.g., 1000)"
-                          className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
-                          min="1"
-                          max="50000" // Reasonable upper limit
-                          required
-                        />
-                        {/* ✅ NEW: Quantity guidance */}
-                        {formInputs[job._id]?.quantity && Number(formInputs[job._id]?.quantity) > quantityInfo.targetQuantity && (
-                          <div className="mt-1 text-orange-600 text-xs">
-                            ⚠️ Exceeds target by {Number(formInputs[job._id]?.quantity) - quantityInfo.targetQuantity}
+                          {/* ✅ UPDATED: Quantity Input with unlimited support */}
+                          <div className="relative">
+                            <input
+                              type="number"
+                              name="quantity"
+                              value={formInputs[job._id]?.quantity || ''}
+                              onChange={(e) => handleChange(job._id, e)}
+                              placeholder="Enter any quantity (e.g., 1000)"
+                              className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
+                              min="1"
+                              max="50000" // Reasonable upper limit
+                              required
+                            />
+                            {/* ✅ NEW: Quantity guidance */}
+                            {formInputs[job._id]?.quantity && Number(formInputs[job._id]?.quantity) > quantityInfo.targetQuantity && (
+                              <div className="mt-1 text-orange-600 text-xs">
+                                ⚠️ Exceeds target by {Number(formInputs[job._id]?.quantity) - quantityInfo.targetQuantity}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
 
-                      {/* Company Input */}
-                      <input
-                        type="text"
-                        name="company"
-                        value={formInputs[job._id]?.company || ''}
-                        onChange={(e) => handleChange(job._id, e)}
-                        placeholder="Enter your company name *"
-                        className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
-                        required
-                      />
+                          {/* Company Input */}
+                          <input
+                            type="text"
+                            name="company"
+                            value={formInputs[job._id]?.company || ''}
+                            onChange={(e) => handleChange(job._id, e)}
+                            placeholder="Enter your company name *"
+                            className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs"
+                            required
+                          />
 
-                      {/* Note Input */}
-                      <textarea
-                        name="note"
-                        value={formInputs[job._id]?.note || ''}
-                        onChange={(e) => handleChange(job._id, e)}
-                        rows={2}
-                        placeholder="Enter your note (required) *"
-                        className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs resize-none"
-                        required
-                      />
+                          {/* Note Input */}
+                          <textarea
+                            name="note"
+                            value={formInputs[job._id]?.note || ''}
+                            onChange={(e) => handleChange(job._id, e)}
+                            rows={2}
+                            placeholder="Enter your note (required) *"
+                            className="w-full border border-amber-300 px-2 py-1 rounded-lg focus:ring-1 focus:ring-amber-400 focus:outline-none transition text-xs resize-none"
+                            required
+                          />
 
-                      <button
-                        onClick={() => handleApply(job)}
-                        disabled={loading}
-                        className="w-full bg-amber-900 text-white font-semibold py-2 px-3 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 disabled:cursor-not-allowed text-xs"
-                      >
-                        {loading ? 'Applying...' : 'Apply (Unlimited)'}
-                      </button>
+                          <button
+                            onClick={() => handleApply(job)}
+                            disabled={loading}
+                            className="w-full bg-amber-900 text-white font-semibold py-2 px-3 rounded-lg hover:bg-amber-800 transition disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+                          >
+                            {loading ? 'Applying...' : 'Apply (Unlimited)'}
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -869,6 +1040,12 @@ export default function WorkerProductionPage() {
                   {selectedJobMaterials.productCode && (
                     <p className="text-blue-600 text-sm font-medium">
                       Code: {selectedJobMaterials.productCode}
+                    </p>
+                  )}
+                  {/* ✅ NEW: Show VAT in modal */}
+                  {selectedJobMaterials.vatPercentage && (
+                    <p className="text-green-600 text-sm font-medium">
+                      VAT: {selectedJobMaterials.vatPercentage}%
                     </p>
                   )}
                   <p className="text-blue-700 text-sm">

@@ -5,6 +5,7 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url)
     const email = searchParams.get('email')
+    const role = searchParams.get('role') // ✅ NEW: Add role filtering
 
     const client = await clientPromise
     const db = client.db('AbuBakkarLeathers')
@@ -14,9 +15,19 @@ export async function GET(req) {
       return NextResponse.json({ exists: !!user, user })
     }
 
-    const users = await db.collection('user').find().toArray()
+    // ✅ NEW: Filter by role if provided
+    let query = {}
+    if (role) {
+      query.role = role
+      console.log('🔍 Filtering users by role:', role)
+    }
+
+    const users = await db.collection('user').find(query).toArray()
+    console.log(`📋 Found ${users.length} users${role ? ` with role: ${role}` : ''}`)
+    
     return NextResponse.json(users)
   } catch (err) {
+    console.error('❌ GET /api/user error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
